@@ -180,7 +180,8 @@
    #:Hashtable)
 
   (:import-from
-   #:coalton-library/monad/io)
+   #:coalton-library/monad/io
+   #:IO)
   (:export
    #:IO)
 
