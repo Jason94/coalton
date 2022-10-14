@@ -159,7 +159,7 @@
                (:file "ord-tree")
                (:file "ord-map")
                (:file "char-stream")
-               (:file "char-stream-pure")
+               (:file "char-stream-monadic")
                (:file "system")
                (:file "prelude")))
 
