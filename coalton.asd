@@ -133,7 +133,7 @@
                 :serial t
                 :components ((:file "arith")
                              (:file "num")
-                             (:file "bounded") 
+                             (:file "bounded")
                              (:file "conversions")
                              (:file "fraction")
                              (:file "integral")
@@ -154,6 +154,7 @@
                (:file "slice")
                (:file "hashtable")
                (:file "monad/state")
+               (:file "monad/io")
                (:file "iterator")
                (:file "ord-tree")
                (:file "ord-map")

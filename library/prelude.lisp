@@ -180,6 +180,11 @@
    #:Hashtable)
 
   (:import-from
+   #:coalton-library/monad/io)
+  (:export
+   #:IO)
+
+  (:import-from
    #:coalton-library/iterator
    #:Iterator)
   (:export
@@ -217,6 +222,7 @@
    (#:slice #:coalton-library/slice)
    (#:hashtable #:coalton-library/hashtable)
    (#:st #:coalton-library/monad/state)
+   (#:io-m #:coalton-library/monad/io)
    (#:iter #:coalton-library/iterator)
    (#:sys #:coalton-library/system)))
 
