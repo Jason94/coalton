@@ -36,6 +36,9 @@
 
    #:write-line!
 
+   #:read-line-std!
+   #:write-line-std!
+
    ;; common lisp condition classes
    #:coalton-stream-error
    #:coalton-stream-error-simple
@@ -434,6 +437,20 @@
 
 (cl:defmethod gray:stream-force-output ((stream coalton-char-output-stream))
   (call-coalton-function (coalton-force-output-function stream) Unit))
+
+(coalton-toplevel
+  (declare read-line-std! (Unit -> String))
+  (define (read-line-std!)
+    "Read a string from standard-input. Retruns a bare string, assuming that
+     standard-input will always be available."
+    (unwrap-stream-result (read-line! (standard-input))))
+
+  (declare write-line-std! (String -> Unit))
+  (define (write-line-std! string)
+    "Write a string to standard-output. Returns a bare Unit, assuming that
+     standard-output will always be available."
+    (unwrap-stream-result (write-line! (standard-output) string))))
+
 
 #+sb-package-locks
 (sb-ext:lock-package "COALTON-LIBRARY/CHAR-STREAM")
