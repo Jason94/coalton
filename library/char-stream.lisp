@@ -18,6 +18,9 @@
    #:open?
    #:close!
 
+   #:standard-input
+   #:standard-output
+
    #:Input
    #:read-char!
    #:read-line!
@@ -208,6 +211,16 @@
                      string))
     (define (flush-output! flush-op stream)
       (flush-output! flush-op (the %OutputStream (into stream)))))
+
+  (declare standard-input (Unit -> %InputStream))
+  (define (standard-input)
+    (lisp %InputStream ()
+      cl:*standard-input*))
+
+  (declare standard-output (Unit -> %OutputStream))
+  (define (standard-output)
+    (lisp %OutputStream ()
+      cl:*standard-output*))
 
   (declare write-line! (Output :stream => :stream -> String -> Result StreamError Unit))
   (define (write-line! stream string)
