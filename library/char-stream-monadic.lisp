@@ -166,7 +166,7 @@
 (cl:in-package #:coalton-library/char-stream-monadic)
 
 (cl:eval-when (:compile-toplevel :load-toplevel :execute)
-  (cl:defun safe-symbol (unbound-symbol)
+  (cl:defun bound-symbol (unbound-symbol)
     "Given the symbol for an unbound function, produce a symbol for an IO-bound version.
 
      If the unbound symbol ends in '!' it strips it. Otherwise uses the same name."
@@ -178,13 +178,13 @@
            (cl:subseq name 0 (cl:1- (cl:length name)))
            name)))))
 
-(cl:defmacro define-monadic (arity unsafe-symbol)
+(cl:defmacro define-monadic (arity unbound-symbol)
   (cl:let ((arg-syms (cl:loop for n from 1 to arity collect (cl:gensym))))
     `(coalton-toplevel
-       (define (,(safe-symbol unsafe-symbol) ,@arg-syms)
+       (define (,(bound-symbol unbound-symbol) ,@arg-syms)
          (IO
            (fn ()
-             (,unsafe-symbol ,@arg-syms)))))))
+             (,unbound-symbol ,@arg-syms)))))))
 
 (define-monadic 1 cs:open?)
 (define-monadic 1 cs:close!)
