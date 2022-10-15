@@ -67,18 +67,18 @@
   ;; referencing these types
   (repr :native cl:stream)
   (define-type %AbstractStream)
-  
-  (repr :native (cl:and cl:stream (cl:satisfies cl:input-stream-p)))
+
+  (repr :native cl:stream)
   (define-type %InputStream)
 
   (%define-into-as-unsafe-coerce %InputStream %AbstractStream)
 
-  (repr :native (cl:and cl:stream (cl:satisfies cl:output-stream-p)))
+  (repr :native cl:stream)
   (define-type %OutputStream)
 
   (%define-into-as-unsafe-coerce %OutputStream %AbstractStream)
 
-  (repr :native (cl:and cl:stream (cl:satisfies cl:input-stream-p) (cl:satisfies cl:output-stream-p)))
+  (repr :native cl:stream)
   (define-type %TwoWayStream)
 
   (%define-into-as-unsafe-coerce %TwoWayStream %AbstractStream)
