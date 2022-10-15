@@ -121,7 +121,8 @@
   (define (%abstract-stream-close! stream)
     (if (%abstract-stream-open? stream)
         (Ok (lisp Unit (stream)
-              (cl:close stream)))
+              (cl:close stream)
+              Unit))
         (Err StreamErrorClosed))))
 
 (cl:defmacro %define-stream-by-into-abstract-stream (stream-type)
