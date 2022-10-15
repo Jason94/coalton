@@ -84,7 +84,7 @@
   (%define-into-as-unsafe-coerce %TwoWayStream %AbstractStream)
   (%define-into-as-unsafe-coerce %TwoWayStream %InputStream)
   (%define-into-as-unsafe-coerce %TwoWayStream %OutputStream)
-  
+
   ;; variants of this type correspond 1:1 with subclasses of `cl:stream-error' on SBCL
   (define-type StreamError
     (StreamErrorSimple String) ; encodes SBCL's `sb-int:simple-stream-error'
@@ -307,7 +307,7 @@
     (match res
       ((Ok success) success)
       ((Err error) (throw-stream-error error))))
-  
+
   (declare get-open?-function (Stream :stream => :stream -> Unit -> Boolean))
   (define (get-open?-function stream)
     (fn ()
@@ -455,4 +455,3 @@
 
 #+sb-package-locks
 (sb-ext:lock-package "COALTON-LIBRARY/CHAR-STREAM")
-
