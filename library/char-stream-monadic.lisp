@@ -3,7 +3,19 @@
         #:coalton-library/classes
         #:coalton-library/monad/io)
   (:local-nicknames (#:cs #:coalton-library/char-stream))
+  (:import-from #:coalton-library/char-stream
+    #:Input
+    #:Output)
   (:export
+    ;; We don't want users to mix unbound and monadic IO, so we provide the
+    ;; types and access to standard input/output that don't need to be wrapped.
+    #:Input
+    #:Output
+
+    #:standard-input
+    #:standard-output
+
+    ;; Monadic IO interface
     #:open?
     #:close
 
