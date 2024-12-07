@@ -30,6 +30,9 @@
 (define-coalton-editor-macro coalton:define (var-or-fun &body body)
   "Define a variable or function. (Coalton top-level operator.)")
 
+(define-coalton-editor-macro coalton:define-alias (name type)
+  "Define a new type alias. (Coalton top-level operator.)")
+
 (define-coalton-editor-macro coalton:define-type (name &body definition)
   "Create a new algebraic data type named NAME. (Coalton top-level operator.)")
 

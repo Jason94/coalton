@@ -296,6 +296,25 @@
 (deftype toplevel-define-struct-list ()
   '(satisfies toplevel-define-struct-list-p))
 
+(defstruct (toplevel-define-alias
+            (:copier nil))
+  (name         (util:required 'name)         :type identifier-src                   :read-only t)
+  (vars         (util:required 'vars)         :type keyword-src-list                 :read-only t)
+  (type         (util:required 'type)         :type qualified-ty                     :read-only t)
+  (location     (util:required 'location)     :type source:location                  :read-only t)
+  (monomorphize (util:required 'monomorphize) :type (or null attribute-monomorphize) :read-only nil))
+
+(defmethod source:location ((self toplevel-define-alias))
+  (toplevel-define-alias-location self))
+
+(eval-when (:load-toplevel :compile-toplevel :execute)
+  (defun toplevel-define-alias-list-p (x)
+    (and (alexandria:proper-list-p x)
+         (every #'toplevel-define-alias-p x))))
+
+(deftype toplevel-define-alias-list ()
+  '(satisfies toplevel-define-alias-list-p))
+
 (defstruct (toplevel-declare
             (:copier nil))
   (name         (util:required 'name)         :type identifier-src                   :read-only t)
@@ -466,6 +485,7 @@
 (defstruct program
   (package         nil :type (or null toplevel-package)    :read-only t)
   (types           nil :type toplevel-define-type-list     :read-only nil)
+  (aliases         nil :type toplevel-define-alias-list    :read-only nil)
   (structs         nil :type toplevel-define-struct-list   :read-only nil)
   (declares        nil :type toplevel-declare-list         :read-only nil)
   (defines         nil :type toplevel-define-list          :read-only nil)
@@ -520,6 +540,7 @@ If MODE is :macro, a package form is forbidden, and an explicit check is made fo
                                 "attribute must be attached to another form")))
 
     (setf (program-types program) (nreverse (program-types program)))
+    (setf (program-aliases program) (nreverse (program-aliases program)))
     (setf (program-structs program) (nreverse (program-structs program)))
     (setf (program-declares program) (nreverse (program-declares program)))
     (setf (program-defines program) (nreverse (program-defines program)))
@@ -843,6 +864,13 @@ If the parsed form is an attribute (e.g., repr or monomorphize), add it to to AT
        (setf (toplevel-define-monomorphize define) monomorphize)
        (push define (program-defines program))
        t))
+    
+    ((coalton:define-alias)
+     (let* ((alias (parse-define-alias form source))
+            (monomorphize (consume-monomorphize attributes alias "when parsing define-alias")))
+       (setf (toplevel-define-alias-monomorphize alias) monomorphize)
+       (push alias (program-aliases program))
+       t))
 
     ((coalton:declare)
      (let* ((declare (parse-declare form source))
@@ -955,6 +983,84 @@ consume all attributes")))
        :body body
        :monomorphize nil
        :location (form-location source form)))))
+
+(defun parse-define-alias (form source)
+  (declare (type cst:cst form)
+           (values toplevel-define-alias))
+  
+  (assert (cst:consp form))
+
+  (let ((name nil)
+        (vars nil))
+
+    ;; (define-alias)
+    (unless (cst:consp (cst:rest form))
+      (parse-error "Malformed type alias"
+                  (note source form "expected define-alias body")))
+    
+    ;; (define-alias x)
+    (unless (cst:consp (cst:rest (cst:rest form)))
+      (parse-error "Malformed type alias"
+                  (note source form "expected type")))
+    
+    ;; (define-alias x y z)
+    (when (cst:consp (cst:rest (cst:rest (cst:rest form))))
+      (parse-error "Malformed type alias"
+                  (note source (cst:first (cst:rest (cst:rest (cst:rest form))))
+                        "unexpected trailing form")))
+    
+    (if (cst:atom (cst:second form))
+      ;; (define-alias 0.5 x)
+      (if (identifierp (cst:raw (cst:second form)))
+        (setf name (make-identifier-src
+                     :name (cst:raw (cst:second form))
+                     :location (form-location source (cst:second form))))
+        (parse-error "Malformed type alias"
+                    (note source (cst:second form)
+                          "expected symbol")))
+
+      (cond
+
+        ;; (define-alias ((T) ...) ...)
+        ((not (cst:atom (cst:first (cst:second form))))
+         (parse-error "Malformed type alias"
+                      (note source (cst:first (cst:second form))
+                                   "expected symbol")
+                      (help source (cst:second form)
+                            (lambda (existing)
+                              (subseq existing 1 (1- (length existing))))
+                            "remove parentheses")))
+        
+        ;; (define-alias (1 ...) ...)
+        ((not (identifierp (cst:raw (cst:first (cst:second form)))))
+         (parse-error "Malformed type alias"
+                      (note source (cst:first (cst:second form))
+                            "expected symbol")))
+        
+        ;; (define-alias (T) ...)
+        ((cst:atom (cst:rest (cst:second form)))
+         (parse-error "Malformed type alias"
+                      (note source (cst:second form)
+                            "nullary types should not have parentheses")
+                      (help source (cst:second form)
+                            (lambda (existing)
+                              (subseq existing 1 (1- (length existing))))
+                            "remove parentheses")))
+         
+         (t 
+          (setf name (make-identifier-src
+                        :name (cst:raw (cst:first (cst:second form)))
+                        :location (form-location source (cst:first (cst:second form)))))
+          (loop :for type-vars := (cst:rest (cst:second form)) then (cst:rest type-vars)
+                :while (cst:consp type-vars)
+                :do (push (parse-type-variable (cst:first type-vars) source) vars)))))
+    
+    (make-toplevel-define-alias
+      :name name
+      :vars vars
+      :type (parse-qualified-type (cst:third form) source)
+      :monomorphize nil
+      :location (form-location source form))))
 
 (defun parse-declare (form source)
   (declare (type cst:cst form)

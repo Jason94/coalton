@@ -16,16 +16,23 @@
    ))
 
 (in-package #:coalton-impl/typechecker/unify)
+(cl:declaim (optimize (speed 0) (space 0) (debug 3)))
+
 
 ;;;
 ;;; Type unification
 ;;;
 
+;(cl:trace unify)
+;(cl:untrace unify)
+
 (defun unify (substs type1 type2)
   "Unify TYPE1 and TYPE2 under given substitutions, returning an updated substitution list"
   (let ((new-substs (mgu (apply-substitution substs type1)
                          (apply-substitution substs type2))))
-    (compose-substitution-lists new-substs substs)))
+    (let ((result (compose-substitution-lists new-substs substs)))
+      ; (cl:break)
+      result)))
 
 (defgeneric mgu (type1 type2)
   (:documentation "Returns a SUBSTITUTION-LIST of the most general substitutions required to unify TYPE1 and TYPE2.")
