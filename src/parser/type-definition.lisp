@@ -21,6 +21,7 @@
    #:type-definition-name               ; FUNCTION
    #:type-definition-vars               ; FUNCTION
    #:type-definition-repr               ; FUNCTION
+   #:type-definition-has-ctors-p        ; FUNCTION
    #:type-definition-ctors              ; FUNCTION
    #:type-definition-ctor-name          ; FUNCTION
    #:type-definition-ctor-field-types   ; FUNCTION
@@ -29,7 +30,7 @@
 (in-package #:coalton-impl/parser/type-definition)
 
 (deftype type-definition ()
-  '(or toplevel-define-type toplevel-define-struct))
+  '(or toplevel-define-type toplevel-define-alias toplevel-define-struct))
 
 (defun type-definition-p (x)
   (typep x 'type-definition))
@@ -59,6 +60,10 @@
     (declare (values keyword-src-list))
     (toplevel-define-type-vars def))
 
+  (:method ((def toplevel-define-alias))
+    (declare (values keyword-src-list))
+    (toplevel-define-alias-vars def))
+
   (:method ((def toplevel-define-struct))
     (declare (values keyword-src-list))
     (toplevel-define-struct-vars def)))
@@ -71,6 +76,19 @@
   (:method ((def toplevel-define-struct))
     (declare (values (or null attribute-repr)))
     (toplevel-define-struct-repr def)))
+
+(defgeneric type-definition-has-ctors-p (def)
+  (:method ((def toplevel-define-type))
+    (declare (values boolean))
+    t)
+
+  (:method ((def toplevel-define-alias))
+    (declare (values boolean))
+    nil)
+
+  (:method ((def toplevel-define-struct))
+    (declare (values boolean))
+    t))
 
 (defgeneric type-definition-ctors (def)
   (:method ((def toplevel-define-type))

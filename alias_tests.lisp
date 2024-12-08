@@ -2,13 +2,21 @@
 (cl:import 'cl:inspect)
 
 (coalton-toplevel
-  (define-alias Foo-Bar Integer)
+ ; (define-alias Foo-Bar Integer)
 
-  (define-alias (MyList :a) (List :a))
+  ;(define-type Fruits Apple Banana)
+  ;(define-alias (MyList :a) (List :a))
 
   (define-alias Foo-Bar String)
 
   (define-type Foo Biscuit)
+  (define-struct Person
+    (name String)
+    (age Integer))
+
+;  (define-alias Foo Integer)
+  ;(declare foo-f (Foo-Bar -> Integer))
+  ;(define (foo-f x) (+ x 1))
 )
 
   ; (define-type Foo Biscuit)

@@ -130,10 +130,10 @@
 
   (let* ((type-names (mapcar (alexandria:compose #'parser:identifier-src-name
                                                  #'parser:type-definition-name)
-                             (append types structs)))
+                             (append types aliases structs)))
 
          (type-dependencies
-           (loop :for type :in (append types structs)
+           (loop :for type :in (append types aliases structs)
                  :for referenced-types := (parser:collect-referenced-types type)
                  :collect (list*
                            (parser:identifier-src-name (parser:type-definition-name type))
@@ -143,7 +143,7 @@
 
          (type-table
            (loop :with table := (make-hash-table :test #'eq)
-                 :for type :in (append types structs)
+                 :for type :in (append types aliases structs)
                  :for type-name := (parser:identifier-src-name (parser:type-definition-name type))
                  :do (setf (gethash type-name table) type)
                  :finally (return table)))
@@ -304,6 +304,7 @@
     ;; Infer the kinds of each type
     (loop :for type :in types
           :for name := (parser:identifier-src-name (parser:type-definition-name type))
+          :when (parser:type-definition-has-ctors-p type)
           :do (loop :for ctor :in (parser:type-definition-ctors type)
                     :for ctor-name := (parser:identifier-src-name (parser:type-definition-ctor-name ctor))
                     :for fields := (loop :for field :in (parser:type-definition-ctor-field-types ctor)
