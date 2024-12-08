@@ -36,6 +36,13 @@
    #:toplevel-define-type-repr                   ; ACCESSOR
    #:toplevel-define-type-head-location          ; ACCESSOR
    #:toplevel-define-type-list                   ; TYPE
+   #:make-toplevel-define-alias                  ; CONSTRUCTOR
+   #:toplevel-define-alias                       ; STRUCT
+   #:toplevel-define-alias-name                  ; ACCESSOR
+   #:toplevel-define-alias-vars                  ; ACCESSOR
+   #:toplevel-define-alias-type                  ; ACCESSOR
+   #:toplevel-define-alias-location              ; ACCESSOR
+   #:toplevel-define-alias-monomorphize          ; ACCESSOR
    #:toplevel-define-alias-list                  ; TYPE
    #:struct-field                                ; STRUCT
    #:make-struct-field                           ; CONSTRUCTOR
@@ -842,8 +849,6 @@ If the parsed form is an attribute (e.g., repr or monomorphize), add it to to AT
            (type (vector attribute) attributes)
            (values boolean &optional))
   
-  (break)
-
   (when (cst:atom form)
     (parse-error "Malformed toplevel form"
                  (note source form "Unexpected atom")))

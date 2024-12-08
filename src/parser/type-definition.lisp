@@ -46,6 +46,10 @@
     (declare (values identifier-src))
     (toplevel-define-type-name def))
 
+  (:method ((def toplevel-define-alias))
+    (declare (values identifier-src))
+    (toplevel-define-alias-name def))
+
   (:method ((def toplevel-define-struct))
     (declare (values identifier-src))
     (toplevel-define-struct-name def)))
