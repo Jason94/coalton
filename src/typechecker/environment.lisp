@@ -413,6 +413,12 @@
             :docstring "Homogeneous list of objects represented as a Common Lisp `list`.")))))
 
 ;;;
+;;; Alias environments
+;;;
+
+(defstruct (alias-environment (:include immutable-map)))
+
+;;;
 ;;; Constructor environment
 ;;;
 
@@ -801,6 +807,7 @@
 (defstruct environment
   (value-environment          (util:required 'value-environment)          :type value-environment          :read-only t)
   (type-environment           (util:required 'type-environment)           :type type-environment           :read-only t)
+  (alias-environment          (util:required 'alias-environment)          :type alias-environment          :read-only t)
   (constructor-environment    (util:required 'constructor-environment)    :type constructor-environment    :read-only t)
   (struct-environment         (util:required 'struct-environment)         :type struct-environment         :read-only t)
   (class-environment          (util:required 'class-environment)          :type class-environment          :read-only t)
@@ -830,6 +837,7 @@
   (make-environment
    :value-environment (make-value-environment)
    :type-environment (make-default-type-environment)
+   :alias-environment (make-alias-environment)
    :struct-environment (make-struct-environment)
    :constructor-environment (make-default-constructor-environment)
    :class-environment (make-class-environment)
@@ -846,6 +854,7 @@
                            &key
                              (value-environment (environment-value-environment env))
                              (type-environment (environment-type-environment env))
+                             (alias-environment (environment-alias-environment env))
                              (constructor-environment (environment-constructor-environment env))
                              (struct-environment (environment-struct-environment env))
                              (class-environment (environment-class-environment env))
@@ -859,6 +868,7 @@
                              (source-name-environment (environment-source-name-environment env)))
   (declare (type environment env)
            (type value-environment value-environment)
+           (type alias-environment alias-environment)
            (type constructor-environment constructor-environment)
            (type struct-environment struct-environment)
            (type class-environment class-environment)
@@ -874,6 +884,7 @@
   (make-environment
    :value-environment value-environment
    :type-environment type-environment
+   :alias-environment alias-environment
    :constructor-environment constructor-environment
    :struct-environment struct-environment
    :class-environment class-environment
