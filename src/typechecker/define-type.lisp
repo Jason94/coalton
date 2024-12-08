@@ -81,7 +81,8 @@
            (type parser:toplevel-define-struct-list structs)
            (type parser:toplevel-define-alias-list aliases)
            (type tc:environment env)
-           (values type-definition-list parser:toplevel-define-instance-list tc:environment))
+           (values type-definition-list parser:toplevel-define-instance-list tc:environment)
+           (optimize (debug 3)))
 
   ;; Ensure that all types are defined in the current package
   (check-package (append types aliases structs)
@@ -130,7 +131,7 @@
 
   (let* ((type-names (mapcar (alexandria:compose #'parser:identifier-src-name
                                                  #'parser:type-definition-name)
-                             (append types aliases structs)))
+                             (append types structs)))
 
          (type-dependencies
            (loop :for type :in (append types aliases structs)
@@ -143,7 +144,7 @@
 
          (type-table
            (loop :with table := (make-hash-table :test #'eq)
-                 :for type :in (append types aliases structs)
+                 :for type :in (append types structs)
                  :for type-name := (parser:identifier-src-name (parser:type-definition-name type))
                  :do (setf (gethash type-name table) type)
                  :finally (return table)))
@@ -153,43 +154,44 @@
                  :collect (loop :for name :in scc
                                 :collect (gethash name type-table))))
 
-         (instances nil))
+         (instances nil)
+         (type-definitions
+           (loop :for scc :in types-by-scc
+                 :for partial-env := (make-partial-type-env :env env)
 
+                 ;; Register each type in the partial type env
+                 :do (loop :for type :in scc
+                           :for name := (parser:identifier-src-name (parser:type-definition-name type))
+                           :for vars := (mapcar #'parser:keyword-src-name (parser:type-definition-vars type))
+
+                           ;; Register each type's type variables in the environment. A
+                           ;; mapping is stored from (type-name, var-name) to kind-variable
+                           ;; because type variable names are not unique between define-types.
+                           :for kvars
+                             := (loop :for var :in vars
+                                      :collect (tc:kind-of (partial-type-env-add-var partial-env var)))
+
+                           :for kind := (tc:make-kind-function* kvars tc:+kstar+)
+                           :for ty := (tc:make-tycon :name name :kind kind)
+                           :do (partial-type-env-add-type partial-env name ty))
+
+                 :append  (multiple-value-bind (type-definitions instances_ ksubs)
+                              (infer-define-type-scc-kinds scc partial-env)
+                            (setf instances (append instances instances_))
+                            (loop :for type :in type-definitions
+
+                                  :for parser-type := (gethash (type-definition-name type) type-table)
+
+                                  :for vars := (tc:apply-ksubstitution
+                                                ksubs
+                                                (loop :for var :in (parser:type-definition-vars parser-type)
+                                                      :for var-name := (parser:keyword-src-name var)
+                                                      :collect (gethash var-name (partial-type-env-ty-table partial-env))))
+
+                                  :do (setf env (update-env-for-type-definition type vars parser-type env))
+                                  :finally (return type-definitions))))))
     (values
-     (loop :for scc :in types-by-scc
-           :for partial-env := (make-partial-type-env :env env)
-
-           ;; Register each type in the partial type env
-           :do (loop :for type :in scc
-                     :for name := (parser:identifier-src-name (parser:type-definition-name type))
-                     :for vars := (mapcar #'parser:keyword-src-name (parser:type-definition-vars type))
-
-                     ;; Register each type's type variables in the environment. A
-                     ;; mapping is stored from (type-name, var-name) to kind-variable
-                     ;; because type variable names are not unique between define-types.
-                     :for kvars
-                       := (loop :for var :in vars
-                                :collect (tc:kind-of (partial-type-env-add-var partial-env var)))
-
-                     :for kind := (tc:make-kind-function* kvars tc:+kstar+)
-                     :for ty := (tc:make-tycon :name name :kind kind)
-                     :do (partial-type-env-add-type partial-env name ty))
-
-           :append  (multiple-value-bind (type-definitions instances_ ksubs)
-                        (infer-define-type-scc-kinds scc partial-env)
-                      (setf instances (append instances instances_))
-                      (loop :for type :in type-definitions
-
-                            :for parser-type := (gethash (type-definition-name type) type-table)
-
-                            :for vars := (tc:apply-ksubstitution
-                                          ksubs
-                                          (loop :for var :in (parser:type-definition-vars parser-type)
-                                                :for var-name := (parser:keyword-src-name var)
-                                                :collect (gethash var-name (partial-type-env-ty-table partial-env))))
-
-                            :do (setf env (update-env-for-type-definition type vars parser-type env))
-                            :finally (return type-definitions))))
+     type-definitions
      instances
      env)))
 
@@ -304,7 +306,8 @@
     ;; Infer the kinds of each type
     (loop :for type :in types
           :for name := (parser:identifier-src-name (parser:type-definition-name type))
-          :when (parser:type-definition-has-ctors-p type)
+          ; TODO: Probably are not going to implement aliases this way. Remove this and the has-ctors-p function.
+          ; :when (parser:type-definition-has-ctors-p type)
           :do (loop :for ctor :in (parser:type-definition-ctors type)
                     :for ctor-name := (parser:identifier-src-name (parser:type-definition-ctor-name ctor))
                     :for fields := (loop :for field :in (parser:type-definition-ctor-field-types ctor)
