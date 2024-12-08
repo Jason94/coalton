@@ -20,6 +20,7 @@
    #:Functor #:map
    #:Applicative #:pure #:liftA2
    #:Monad #:>>=
+   #:MonadTransformer #:lift
    #:>> #:join
    #:MonadFail #:fail
    #:Alternative #:alt #:empty
@@ -209,6 +210,11 @@
   (define-class (Applicative :m => Monad :m)
     "Types which are monads as defined in Haskell. See https://wiki.haskell.org/Monad for more information."
     (>>= (:m :a -> (:a -> :m :b) -> :m :b)))
+
+  (define-class (MonadTransformer :t)
+    "Types which are monads that wrap another monad, allowing you to use - for example - State and Result
+together."
+    (lift (Monad :m => :m :a -> :t :m :a)))
 
   (declare >> (Monad :m => (:m :a) -> (:m :b) -> (:m :b)))
   (define (>> a b)
