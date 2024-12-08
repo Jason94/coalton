@@ -34,9 +34,12 @@
 
         (env *global-environment*))
 
+    (format t "Aliases: ~a~%" (parser:program-aliases program))
+    (break)
     (multiple-value-bind (type-definitions instances env)
         (tc:toplevel-define-type (parser:program-types program)
                                  (parser:program-structs program)
+                                 (parser:program-aliases program)
                                  env)
 
       (let ((all-instances (append instances (parser:program-instances program))))

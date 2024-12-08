@@ -76,19 +76,20 @@
 (deftype type-definition-list ()
   '(satisfies type-definition-list-p))
 
-(defun toplevel-define-type (types structs env)
+(defun toplevel-define-type (types structs aliases env)
   (declare (type parser:toplevel-define-type-list types)
            (type parser:toplevel-define-struct-list structs)
+           (type parser:toplevel-define-alias-list aliases)
            (type tc:environment env)
            (values type-definition-list parser:toplevel-define-instance-list tc:environment))
 
   ;; Ensure that all types are defined in the current package
-  (check-package (append types structs)
+  (check-package (append types aliases structs)
                  (alexandria:compose #'parser:identifier-src-name
                                      #'parser:type-definition-name)
                  (alexandria:compose #'source:location
                                      #'parser:type-definition-name))
-
+  
   ;; Ensure that all constructors are defined in the current package
   (check-package (mapcan (alexandria:compose #'copy-list #'parser:toplevel-define-type-ctors)
                          types)
@@ -99,7 +100,7 @@
 
   ;; Ensure that there are no duplicate type definitions
   (check-duplicates
-   (append types structs)
+   (append types aliases structs)
    (alexandria:compose #'parser:identifier-src-name #'parser:type-definition-name)
    (lambda (first second)
      (tc:tc-error "Duplicate type definitions"
@@ -118,7 +119,7 @@
                   (tc:tc-note second "second definition here"))))
 
   ;; Ensure that no type has duplicate type variables
-  (loop :for type :in (append types structs)
+  (loop :for type :in (append types aliases structs)
         :do (check-duplicates
              (parser:type-definition-vars type)
              #'parser:keyword-src-name

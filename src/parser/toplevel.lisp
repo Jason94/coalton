@@ -36,6 +36,7 @@
    #:toplevel-define-type-repr                   ; ACCESSOR
    #:toplevel-define-type-head-location          ; ACCESSOR
    #:toplevel-define-type-list                   ; TYPE
+   #:toplevel-define-alias-list                  ; TYPE
    #:struct-field                                ; STRUCT
    #:make-struct-field                           ; CONSTRUCTOR
    #:struct-field-name                           ; ACCESSOR
@@ -112,6 +113,7 @@
    #:program-package                             ; ACCESSOR
    #:program-lisp-forms                          ; ACCESSOR
    #:program-types                               ; ACCESSOR
+   #:program-aliases                             ; ACCESSOR
    #:program-structs                             ; ACCESSOR
    #:program-declares                            ; ACCESSOR
    #:program-defines                             ; ACCESSOR
@@ -839,6 +841,8 @@ If the parsed form is an attribute (e.g., repr or monomorphize), add it to to AT
            (type program program)
            (type (vector attribute) attributes)
            (values boolean &optional))
+  
+  (break)
 
   (when (cst:atom form)
     (parse-error "Malformed toplevel form"
@@ -870,6 +874,7 @@ If the parsed form is an attribute (e.g., repr or monomorphize), add it to to AT
             (monomorphize (consume-monomorphize attributes alias "when parsing define-alias")))
        (setf (toplevel-define-alias-monomorphize alias) monomorphize)
        (push alias (program-aliases program))
+       (format t "Alias: ~a~%" (program-aliases program))
        t))
 
     ((coalton:declare)
