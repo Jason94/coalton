@@ -418,6 +418,11 @@
 
 (defstruct (alias-environment (:include immutable-map)))
 
+(define-env-updater set-alias (env symbol type)
+  (declare (type environment env)
+           (type symbol symbol)
+           (type alias-env-entry))
+  nil)
 ;;;
 ;;; Constructor environment
 ;;;
