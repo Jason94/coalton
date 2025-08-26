@@ -301,6 +301,13 @@
                (:file "file-tests")
                (:file "experimental-tests")
                (:file "exceptions")
+               (:module "collections"
+                :serial t
+                :components ((:file "collection-tests")
+                             (:module "immutable"
+                              :components ((:file "list-tests")))
+                             (:module "mutable"
+                              :components ((:file "vector-tests")))))
                (:module "monad"
                 :serial t
                 :components ((:file "optionalt")
