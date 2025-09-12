@@ -179,4 +179,26 @@
     (declare g (D (List :a) (List :b) => Unit -> List :a))
     (define (g) m)"
    '("f" . "(D :a :b => Unit -> :a)")
-   '("g" . "(D (List :a) (List :b) => Unit -> List :a)")))
+   '("g" . "(D (List :a) (List :b) => Unit -> List :a)"))
+
+  ;; see https://github.com/coalton-lang/coalton/issues/1643
+  (check-coalton-types
+   "(declare myzip1 ((coalton-library/iterator:FromIterator :a (Tuple :b :c))
+                     (coalton-library/iterator:IntoIterator :d :b)
+                     (coalton-library/iterator:IntoIterator :e :c)
+                     => :d -> :e -> :a))
+    (define (myzip1 a b)
+      (coalton-library/iterator:collect!
+       (coalton-library/iterator:zip!
+        (coalton-library/iterator:into-iter a)
+        (coalton-library/iterator:into-iter b))))
+
+    (define (myzip2 a b)
+      (coalton-library/iterator:collect!
+       (coalton-library/iterator:zip!
+        (coalton-library/iterator:into-iter a)
+        (coalton-library/iterator:into-iter b))))"
+   '("myzip2" . "((coalton-library/iterator:FromIterator :a (Tuple :b :c))
+                  (coalton-library/iterator:IntoIterator :d :b)
+                  (coalton-library/iterator:IntoIterator :e :c)
+                  => :d -> :e -> :a)")))
