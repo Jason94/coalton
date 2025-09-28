@@ -30,6 +30,7 @@
    #:constructor                                 ; STRUCT
    #:make-constructor                            ; CONSTRUCTOR
    #:constructor-name                            ; ACCESSOR
+   #:constructor-signature                       ; ACCESSOR
    #:constructor-fields                          ; ACCESSOR
    #:constructor-list                            ; TYPE
    #:toplevel-define-type                        ; STRUCT
@@ -147,7 +148,7 @@
    ))
 
 (in-package #:coalton-impl/parser/toplevel)
-
+(declaim (optimize (speed 0) (space 0) (debug 3)))
 ;;;; # Toplevel Form Parsing
 ;;;;
 ;;;; identifier := <a lisp symbol>
@@ -252,10 +253,11 @@
 
 (defstruct (constructor
             (:copier nil))
-  (name      (util:required 'name)      :type identifier-src   :read-only t)
-  (fields    (util:required 'fields)    :type ty-list          :read-only t)
-  (docstring (util:required 'docstring) :type (or null string) :read-only t)
-  (location  (util:required 'location)  :type source:location  :read-only t))
+  (name      (util:required 'name)      :type identifier-src         :read-only t)
+  (signature (util:required 'signature) :type (or null qualified-ty) :read-only t)
+  (fields    (util:required 'fields)    :type ty-list                :read-only t)
+  (docstring (util:required 'docstring) :type (or null string)       :read-only t)
+  (location  (util:required 'location)  :type source:location        :read-only t))
 
 (defmethod source:location ((self constructor))
   (constructor-location self))
@@ -1878,15 +1880,22 @@ consume all attributes")))
            (values constructor))
 
   (let (unparsed-name
-        unparsed-fields)
+        unparsed-fields
+        signature)
 
     (cond
       ((cst:atom form)
        (setf unparsed-name form))
       (t
-       (progn
+       (let ((remaining-forms (cst:listify (cst:rest form))))
          (setf unparsed-name (cst:first form))
-         (setf unparsed-fields (cst:listify (cst:rest form))))))
+         (if (equalp :type (cst:first remaining-forms))
+             ;; GADT Constructor - (Constr (:type (:a -> Data :a)))
+             (progn
+               (setf signature (parse-qualified-type remaining-forms source))
+               (break))
+             ;; ADT  Constructor - (Constr :a)
+             (setf unparsed-fields remaining-forms)))))
 
     (unless (cst:atom unparsed-name)
       (parse-error "Malformed constructor"
@@ -1904,6 +1913,7 @@ consume all attributes")))
      :name (make-identifier-src
             :name (cst:raw unparsed-name)
             :location (form-location source unparsed-name))
+     :signature signature
      :fields (loop :for field :in unparsed-fields
                    :collect (parse-type field source))
      :location (form-location source form)
