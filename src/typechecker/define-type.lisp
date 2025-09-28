@@ -34,6 +34,7 @@
    #:type-definition-list               ; TYPE
    ))
 
+(declaim (optimize (speed 0) (space 0) (debug 3)))
 ;;;;
 ;;;; Type Definition Processing
 ;;;;
@@ -342,7 +343,9 @@
 
         (ctor-table (make-hash-table :test #'eq))
 
-        (alias-table (make-hash-table :test #'eq)))
+        (alias-table (make-hash-table :test #'eq))
+
+        (ctor-scheme-table (make-hash-table :test #'eq)))
 
     ;; Infer the kinds of each type
     (loop :for type :in types
@@ -351,14 +354,27 @@
                 :for ctor :in (parser:type-definition-ctors type)
                 :for ctor-name
                   := (parser:identifier-src-name (parser:type-definition-ctor-name ctor))
-                :for fields
-                  := (loop
-                       :for field :in (parser:type-definition-ctor-field-types ctor)
-                       :collect (multiple-value-bind (type ksubs_)
-                                    (parse-type field env ksubs)
-                                  (setf ksubs ksubs_)
-                                  type))
-                :do (setf (gethash ctor-name ctor-table) fields)))
+                :for ctor-signature
+                  := (parser:type-definition-ctor-signature ctor)
+                :do
+                   (cond
+                     ;; GADTs are typed by their function signature
+                     (ctor-signature
+                      (multiple-value-bind (qual-ty ksubs_)
+                          (infer-type-kinds ctor-signature tc:+kstar+ ksubs env)
+                        (setf ksubs ksubs_)
+                        (setf (gethash ctor-name ctor-scheme-table) qual-ty)
+                        (setf (gethash ctor-name ctor-table)
+                              (tc:function-type-arguments qual-ty))))
+                     ;; ADTs are typed by their constructor fields
+                     (t
+                      (let ((fields (loop
+                                      :for field :in (parser:type-definition-ctor-field-types ctor)
+                                      :collect (multiple-value-bind (type ksubs_)
+                                                   (parse-type field env ksubs)
+                                                 (setf ksubs ksubs_)
+                                                 type))))
+                        (setf (gethash ctor-name ctor-table) fields))))))
 
     ;; Infer the kinds of each type alias.
     (loop :for type :in types
@@ -417,14 +433,23 @@
                   :in (parser:type-definition-ctors type)
                 :for ctor-name
                   := (parser:identifier-src-name (parser:type-definition-ctor-name ctor))
-                :for ty
-                  := (tc:make-function-type*
-                      (tc:apply-ksubstitution ksubs (gethash ctor-name ctor-table))
-                      (tc:apply-type-argument-list
-                       (tc:apply-ksubstitution ksubs (gethash name (partial-type-env-ty-table env)))
-                       tvars))
-                :collect (tc:quantify-using-tvar-order tvars (tc:qualify nil ty)))
-
+                :for stored-scheme
+                  := (gethash ctor-name ctor-scheme-table)
+                :collect
+                  (if stored-scheme
+                      ;; GADTs resolve the supplied function type
+                      (let* ((qual-ty (tc:apply-ksubstitution ksubs stored-scheme))
+                             (vars-in-qual (tc:type-variables qual-ty))
+                             (extras (set-difference vars-in-qual tvars :test #'equalp))
+                             (ordered (append tvars extras)))
+                        (tc:quantify ordered qual-ty))
+                      ;; ADTs construct a function type from their fields
+                      (let ((ty (tc:make-function-type*
+                                 (tc:apply-ksubstitution ksubs (gethash ctor-name ctor-table))
+                                 (tc:apply-type-argument-list
+                                  (tc:apply-ksubstitution ksubs (gethash name (partial-type-env-ty-table env)))
+                                  tvars))))
+                        (tc:quantify-using-tvar-order tvars (tc:qualify nil ty)))))
 
          :for constructor-args
            := (loop
@@ -438,10 +463,11 @@
          :when (eq repr-type :enum)
            :do (loop
                  :for ctor :in (parser:toplevel-define-type-ctors type)
-                 :unless (endp (parser:constructor-fields ctor))
+                 :for ctor-name
+                   := (parser:identifier-src-name (parser:type-definition-ctor-name ctor))
+                 :unless (endp (gethash ctor-name ctor-table))
                    :do (tc-error "Invalid repr :enum attribute"
-                                 (tc-note (first (parser:constructor-fields ctor))
-                                          "constructors of repr :enum types cannot have fields")))
+                                 (tc-note ctor "Enum constructors cannot have arguments.")))
 
          ;; Check that repr :transparent types have a single constructor
          :when (eq repr-type :transparent)
@@ -469,7 +495,7 @@
                     := (source:docstring ctor)
                   :collect (tc:make-constructor-entry
                             :name ctor-name
-                            :arity (length (parser:type-definition-ctor-field-types ctor))
+                            :arity (length (gethash ctor-name ctor-table))
                             :constructs name
                             :classname classname
                             :docstring ctor-docstring

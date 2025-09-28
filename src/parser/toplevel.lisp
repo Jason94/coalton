@@ -148,7 +148,7 @@
    ))
 
 (in-package #:coalton-impl/parser/toplevel)
-(declaim (optimize (speed 0) (space 0) (debug 3)))
+
 ;;;; # Toplevel Form Parsing
 ;;;;
 ;;;; identifier := <a lisp symbol>
@@ -1898,7 +1898,9 @@ consume all attributes")))
                               (secondary-note source
                                               (cst:first remaining-forms)
                                               "in this type definition"))
-                 (setf signature (parse-qualified-type remaining-forms source)))
+                 (setf signature (parse-qualified-type
+                                  (cst:rest (cst:first remaining-forms))
+                                  source)))
              ;; ADT  Constructor - (Constr :a)
              (setf unparsed-fields (cst:listify remaining-forms))))))
 
