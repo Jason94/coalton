@@ -39,8 +39,8 @@
    ))
 
 (in-package #:coalton-impl/typechecker/define)
-
-(declaim (type (member :toplevel :lambda :do) *return-status*))
+(declaim (optimize (speed 0) (space 0) (debug 3)))
+;; (declaim (type (member :toplevel :lambda :do) *return-status*))
 (defparameter *return-status* :toplevel)
 
 (deftype node-return-info ()
@@ -431,12 +431,12 @@ Returns (VALUES INFERRED-TYPE PREDICATES NODE SUBSTITUTIONS)")
                                subs
                                env)
 
-      (multiple-value-bind (pat-ty pat-node subs)
+      (multiple-value-bind (pat-ty preds_ pat-node subs)
           (infer-pattern-type (parser:node-bind-pattern node)
                               expr-ty   ; unify against expr-ty
                               subs
                               env)
-        (declare (ignore pat-ty))
+        (declare (ignore pat-ty preds_))
 
         (values nil         ; return nil as this is always thrown away
                 preds
@@ -514,9 +514,9 @@ Returns (VALUES INFERRED-TYPE PREDICATES NODE SUBSTITUTIONS)")
                    :location (source:location node)))
                  (loop :for pattern :in (parser:node-abstraction-params node)
                        :for ty :in arg-tys
-                       :collect (multiple-value-bind (ty_ pattern subs_)
+                       :collect (multiple-value-bind (ty_ preds_ pattern subs_)
                                     (infer-pattern-type pattern ty subs env)
-                                  (declare (ignore ty_))
+                                  (declare (ignore ty_ preds_))
                                   (setf subs subs_)
                                   pattern)))))
 
@@ -660,9 +660,9 @@ Returns (VALUES INFERRED-TYPE PREDICATES NODE SUBSTITUTIONS)")
              (pat-nodes
                (loop :for branch :in (parser:node-match-branches node)
                      :for pattern := (parser:node-match-branch-pattern branch)
-                     :collect (multiple-value-bind (pat-ty pat-node subs_)
+                     :collect (multiple-value-bind (pat-ty preds_ pat-node subs_)
                                   (infer-pattern-type pattern expr-ty subs env)
-                                (declare (ignore pat-ty))
+                                (declare (ignore pat-ty preds_))
                                 (setf subs subs_)
                                 pat-node)))
 
@@ -723,7 +723,7 @@ Returns (VALUES INFERRED-TYPE PREDICATES NODE SUBSTITUTIONS)")
                (loop
                  :for branch :in (parser:node-catch-branches node)
                  :for pattern := (parser:node-catch-branch-pattern branch)
-                 :for (pat-ty pat-node subs_)
+                 :for (pat-ty preds_ pat-node subs_)
                    := (multiple-value-list (infer-pattern-type pattern (tc:make-variable) subs env))
                  :unless (or (exception-type-p pat-ty env)
                              (typep pattern 'parser:pattern-wildcard))
@@ -790,7 +790,7 @@ Returns (VALUES INFERRED-TYPE PREDICATES NODE SUBSTITUTIONS)")
                (loop
                  :for branch :in (parser:node-resumable-branches node)
                  :for pattern := (parser:node-resumable-branch-pattern branch)
-                 :for (pat-ty pat-node subs_)
+                 :for (pat-ty preds_ pat-node subs_)
                    := (multiple-value-list (infer-pattern-type pattern (tc:make-variable) subs env))
                  :unless (resumption-type-p pat-ty env)
                    :do (tc-error "Invalid resumable case"
@@ -1259,9 +1259,9 @@ Returns (VALUES INFERRED-TYPE PREDICATES NODE SUBSTITUTIONS)")
                                subs
                                env)
 
-      (multiple-value-bind (pat-ty pat-node subs)
+      (multiple-value-bind (pat-ty preds_ pat-node subs)
           (infer-pattern-type (parser:node-while-let-pattern node) expr-ty subs env)
-        (declare (ignore pat-ty))
+        (declare (ignore pat-ty preds_))
         
         (multiple-value-bind (body-ty preds_ accessors_ body-node subs)
             (infer-expression-type (parser:node-while-let-body node)
@@ -1300,8 +1300,9 @@ Returns (VALUES INFERRED-TYPE PREDICATES NODE SUBSTITUTIONS)")
     (let ((intoiter-symbol
             (util:find-symbol "INTOITERATOR" "COALTON-LIBRARY/ITERATOR")))
 
-      (multiple-value-bind (pat-ty pat-node subs)
+      (multiple-value-bind (pat-ty preds_ pat-node subs)
           (infer-pattern-type (parser:node-for-pattern node) (tc:make-variable) subs env)
+        (declare (ignore preds_))
 
         (multiple-value-bind (expr-ty preds accessors expr-node subs)
             (infer-expression-type (parser:node-for-expr node) (tc:make-variable) subs env)
@@ -1492,12 +1493,12 @@ Returns (VALUES INFERRED-TYPE PREDICATES NODE SUBSTITUTIONS)")
                                  subs
                                  env)
 
-        (multiple-value-bind (ty_ pattern subs)
+        (multiple-value-bind (ty_ preds_ pattern subs)
             (infer-pattern-type (parser:node-do-bind-pattern node)
                                 (tc:tapp-to (tc:apply-substitution subs expr-ty)) ; this should never fail
                                 subs
                                 env)
-          (declare (ignore ty_))
+          (declare (ignore ty_ preds_))
 
           (handler-case
               (progn
@@ -1620,12 +1621,12 @@ Returns (VALUES INFERRED-TYPE PREDICATES NODE SUBSTITUTIONS)")
 (defgeneric infer-pattern-type (pat expected-typ subs env)
   (:documentation "Infer the type of pattern PAT and then unify against EXPECTED-TYPE.
 
-Returns (VALUES INFERRED-TYPE NODE SUBSTITUTIONS)")
+Returns (VALUES INFERRED-TYPE PREDS NODE SUBSTITUTIONS)")
   (:method ((pat parser:pattern-binding) expected-type subs env)
     (declare (type tc:ty expected-type)
              (type tc:substitution-list subs)
              (type tc-env env)
-             (values tc:ty pattern-binding tc:substitution-list))
+             (values tc:ty tc:ty-predicate-list pattern-binding tc:substitution-list))
 
     (check-duplicates (parser:pattern-variables pat)
                       #'parser:pattern-var-name
@@ -1634,13 +1635,17 @@ Returns (VALUES INFERRED-TYPE NODE SUBSTITUTIONS)")
                                   (tc-note first "first definition here")
                                   (tc-note second "second definition here"))))
 
-    (multiple-value-bind (pat-ty bound subs)
+    (multiple-value-bind (pat-ty preds bound subs)
         (infer-pattern-type (parser:pattern-binding-pattern pat) expected-type subs env)
-      (multiple-value-bind (pat-ty var subs)
+      (declare (ignore preds))
+
+      (multiple-value-bind (pat-ty preds var subs)
           (infer-pattern-type (parser:pattern-binding-var pat) pat-ty subs env)
+        (declare (ignore preds))
 
         (values
          pat-ty
+         nil
          (make-pattern-binding
           :type (tc:qualify nil pat-ty)
           :var var
@@ -1651,7 +1656,7 @@ Returns (VALUES INFERRED-TYPE NODE SUBSTITUTIONS)")
     (declare (type tc:ty expected-type)
              (type tc:substitution-list subs)
              (type tc-env env)
-             (values tc:ty pattern-var tc:substitution-list))
+             (values tc:ty tc:ty-predicate-list pattern-var tc:substitution-list))
 
     (let ((ty (tc-env-add-variable env (parser:pattern-var-name pat))))
 
@@ -1661,6 +1666,7 @@ Returns (VALUES INFERRED-TYPE NODE SUBSTITUTIONS)")
       (let ((type (tc:apply-substitution subs ty)))
         (values
          type
+         nil
          (make-pattern-var
           :type (tc:qualify nil type)
           :location (source:location pat)
@@ -1672,7 +1678,7 @@ Returns (VALUES INFERRED-TYPE NODE SUBSTITUTIONS)")
     (declare (type tc:ty expected-type)
              (type tc:substitution-list subs)
              (type tc-env env)
-             (values tc:ty pattern-literal tc:substitution-list))
+             (values tc:ty tc:ty-predicate-list pattern-literal tc:substitution-list))
 
     (let ((ty (etypecase (parser:pattern-literal-value pat)
                 (integer (let* ((num
@@ -1695,6 +1701,7 @@ Returns (VALUES INFERRED-TYPE NODE SUBSTITUTIONS)")
             (let ((type (tc:apply-substitution subs ty)))
               (values
                type
+               nil
                (make-pattern-literal
                 :type (tc:qualify nil type)
                 :location (source:location pat)
@@ -1710,10 +1717,11 @@ Returns (VALUES INFERRED-TYPE NODE SUBSTITUTIONS)")
     (declare (type tc:ty expected-type)
              (type tc:substitution-list subs)
              (type tc-env env)
-             (values tc:ty pattern-wildcard tc:substitution-list))
+             (values tc:ty tc:ty-predicate-list pattern-wildcard tc:substitution-list))
 
     (values
      expected-type
+     nil
      (make-pattern-wildcard
       :type (tc:qualify nil expected-type)
       :location (source:location pat))
@@ -1723,7 +1731,7 @@ Returns (VALUES INFERRED-TYPE NODE SUBSTITUTIONS)")
     (declare (type tc:ty expected-type)
              (type tc:substitution-list subs)
              (type tc-env env)
-             (values tc:ty pattern-constructor tc:substitution-list))
+             (values tc:ty tc:ty-predicate-list pattern-constructor tc:substitution-list))
 
     (let ((ctor (tc:lookup-constructor (tc-env-env env) (parser:pattern-constructor-name pat) :no-error t)))
 
@@ -1749,41 +1757,47 @@ Returns (VALUES INFERRED-TYPE NODE SUBSTITUTIONS)")
                              arity
                              num-args)))
 
-        (let* ((ctor-ty (tc:qualified-ty-type ;; NOTE: Constructors cannot have predicates
-                         (tc:fresh-inst
-                          (tc:lookup-value-type (tc-env-env env) (parser:pattern-constructor-name pat)))))
+        (multiple-value-bind (ctor-ty ctor-preds)
+            (tc-env-lookup-value-symbol env
+                                        (parser:pattern-constructor-name pat)
+                                        (source:location pat))
+          (let* ((pat-ty (tc:function-return-type ctor-ty))
 
-               (pat-ty (tc:function-return-type ctor-ty))
+                 (child-preds nil))
+            (handler-case
+                (progn
+                  (setf subs (tc:unify subs pat-ty expected-type))
+                  (setf ctor-ty (tc:apply-substitution subs ctor-ty))
+                  (setf pat-ty (tc:function-return-type ctor-ty)))
+              (tc:coalton-internal-type-error ()
+                (tc-error "Type mismatch"
+                          (tc-note pat "Expected type '~S' but pattern has type '~S'"
+                                   (tc:apply-substitution subs expected-type)
+                                   (tc:apply-substitution subs pat-ty)))))
 
-               (pattern-nodes
-                 (loop :for arg :in (parser:pattern-constructor-patterns pat)
-                       :for arg-ty :in (tc:function-type-arguments ctor-ty)
-                       :collect (multiple-value-bind (ty_ node_ subs_)
-                                    (infer-pattern-type arg arg-ty subs env)
-                                  (declare (ignore ty_))
-                                  (setf subs subs_)
-                                  node_))))
-
-          (handler-case
-              (progn
-                (setf subs (tc:unify subs pat-ty expected-type))
-                (let ((type (tc:apply-substitution subs pat-ty)))
-                  (values
-                   type
-                   (make-pattern-constructor
-                    :type (tc:qualify nil pat-ty)
-                    :location (source:location pat)
-                    :name (parser:pattern-constructor-name pat)
-                    :patterns pattern-nodes)
-                   subs)))
-            (tc:coalton-internal-type-error ()
-              (tc-error "Type mismatch"
-                        (tc-note pat "Expected type '~S' but pattern has type '~S'"
-                                 (tc:apply-substitution subs expected-type)
-                                 (tc:apply-substitution subs pat-ty))))))))))
+            (let ((pattern-nodes
+                    (loop :for arg :in (parser:pattern-constructor-patterns pat)
+                          :for arg-ty :in (tc:function-type-arguments ctor-ty)
+                          :collect (multiple-value-bind (ty_ child-preds_ node_ subs_)
+                                       (infer-pattern-type arg arg-ty subs env)
+                                     (declare (ignore ty_))
+                                     (setf subs subs_)
+                                     (setf child-preds (nconc child-preds child-preds_))
+                                     node_))))
+              (let ((type (tc:apply-substitution subs pat-ty))
+                    (final-preds (tc:apply-substitution subs (nconc ctor-preds child-preds))))
+                (values
+                 type
+                 final-preds
+                 (make-pattern-constructor
+                  :type (tc:qualify nil pat-ty)
+                  :location (source:location pat)
+                  :name (parser:pattern-constructor-name pat)
+                  :patterns pattern-nodes)
+                 subs)))))))))
 
 ;;;
-;;; Binding Group Type Inference
+;;; Binding Group Type I(declaim (optimize (speed 0) (space 0) (debug 3)))nference
 ;;;
 
 (defun infer-let-bindings (bindings declares subs env)
@@ -2420,9 +2434,9 @@ Returns (VALUES INFERRED-TYPE NODE SUBSTITUTIONS)")
 
          (params (loop :for pattern :in (parser:binding-parameters binding)
                        :for ty :in param-tys
-                       :collect (multiple-value-bind (ty_ pattern subs_)
+                       :collect (multiple-value-bind (ty_ preds_ pattern subs_)
                                     (infer-pattern-type pattern ty subs env)
-                                  (declare (ignore ty_))
+                                  (declare (ignore ty_ preds_))
                                   (setf subs subs_)
                                   pattern)))
 

@@ -18,6 +18,7 @@
    #:tc-env-bound-variables             ; FUNCTION
    #:tc-env-bindings-variables          ; FUNCTION
    #:tc-env-replace-type                ; FUNCTION
+   #:tc-env-lookup-value-symbol         ; FUNCTION
    ))
 
 (in-package #:coalton-impl/typechecker/tc-env)
@@ -136,3 +137,21 @@
   "Returns all of the type variables of the types being checked in ENV. Does not return type variables from the inner main environment because it should not contain any free type variables."
   (loop :for ty :being :the :hash-values :of (tc-env-ty-table env)
         :append (tc:type-variables ty)))
+
+(defun tc-env-lookup-value-symbol (env sym loc)
+  (declare (type tc-env env)
+           (type symbol sym)
+           (type (or source:location null) loc)
+           (values tc:ty tc:ty-predicate-list))
+
+  (let* ((scheme (or (gethash sym (tc-env-ty-table env))
+                     (tc:lookup-value-type (tc-env-env env) sym :no-error t))))
+    (unless scheme
+      (util:coalton-bug "Unknown variable ~a" sym))
+    (let ((q (tc:fresh-inst scheme)))
+      (values (tc:qualified-ty-type q)
+              (loop :for pred in (tc:qualified-ty-predicates q)
+                    :collect (tc:make-ty-predicate
+                              :class (tc:ty-predicate-class pred)
+                              :types (tc:ty-predicate-types pred)
+                              :location loc))))))
