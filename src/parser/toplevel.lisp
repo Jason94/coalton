@@ -1887,15 +1887,20 @@ consume all attributes")))
       ((cst:atom form)
        (setf unparsed-name form))
       (t
-       (let ((remaining-forms (cst:listify (cst:rest form))))
+       (let ((remaining-forms (cst:rest form)))
          (setf unparsed-name (cst:first form))
-         (if (equalp :type (cst:first remaining-forms))
-             ;; GADT Constructor - (Constr (:type (:a -> Data :a)))
-             (progn
-               (setf signature (parse-qualified-type remaining-forms source))
-               (break))
+         (if (and (not (cst:atom (cst:first remaining-forms)))
+                  (eq 'coalton:Type (cst:raw (cst:first (cst:first remaining-forms)))))
+             ;; GADT Constructor - (Constr (Type (:a -> Data :a)))
+             (if (cst:atom (cst:rest (cst:first remaining-forms)))
+                 (parse-error "Malformed GADT constructor"
+                              (note source unparsed-name "expected type signature")
+                              (secondary-note source
+                                              (cst:first remaining-forms)
+                                              "in this type definition"))
+                 (setf signature (parse-qualified-type remaining-forms source)))
              ;; ADT  Constructor - (Constr :a)
-             (setf unparsed-fields remaining-forms)))))
+             (setf unparsed-fields (cst:listify remaining-forms))))))
 
     (unless (cst:atom unparsed-name)
       (parse-error "Malformed constructor"
