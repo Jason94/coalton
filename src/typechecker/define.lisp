@@ -656,14 +656,17 @@ Returns (VALUES INFERRED-TYPE PREDICATES NODE SUBSTITUTIONS)")
                                subs
                                env)
 
-      (let* (;; Infer the type of each pattern, unifying against expr-ty
+      (let* (;; Infer the type of each pattern, unifying against expr-ty, specialized for
+             ;; any branch-specific refinements from a GADT constructor.
+             (branch-subs '())
+
              (pat-nodes
                (loop :for branch :in (parser:node-match-branches node)
                      :for pattern := (parser:node-match-branch-pattern branch)
                      :collect (multiple-value-bind (pat-ty preds_ pat-node subs_)
                                   (infer-pattern-type pattern expr-ty subs env)
                                 (declare (ignore pat-ty preds_))
-                                (setf subs subs_)
+                                (nconc branch-subs (list subs_))
                                 pat-node)))
 
              (ret-ty (tc:make-variable))
@@ -671,9 +674,19 @@ Returns (VALUES INFERRED-TYPE PREDICATES NODE SUBSTITUTIONS)")
              ;; Infer the type of each branch, unifying against ret-ty
              (branch-body-nodes
                (loop :for branch :in (parser:node-match-branches node)
+                     :for subs-branch :in branch-subs
+                     :for branch-ret-ty := (tc:apply-substitution subs-branch ret-ty)
+                     :for orig-ty-table := (tc-env-ty-table env)
+                     :for branch-table := (alexandria:copy-hash-table orig-ty-table)
+                     :for branch-env := (make-tc-env :env (tc-env-env env)
+                                                     :ty-table branch-table)
                      :for body := (parser:node-match-branch-body branch)
+                     :do (maphash (lambda (name scheme)
+                                    (setf (gethash name branch-table)
+                                          (tc:apply-substitution subs-branch scheme)))
+                                  orig-ty-table)
                      :collect (multiple-value-bind (body-ty preds_ accessors_ body-node subs_)
-                                  (infer-expression-type body ret-ty subs env)
+                                  (infer-expression-type body branch-ret-ty subs branch-env)
                                 (declare (ignore body-ty))
                                 (setf subs subs_)
                                 (setf preds (append preds preds_))
