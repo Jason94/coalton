@@ -658,26 +658,30 @@ Returns (VALUES INFERRED-TYPE PREDICATES NODE SUBSTITUTIONS)")
 
       (let* (;; Infer the type of each pattern, unifying against expr-ty, specialized for
              ;; any branch-specific refinements from a GADT constructor.
-             (branch-subs '())
-
-             (pat-nodes
+             (branch-data
                (loop :for branch :in (parser:node-match-branches node)
                      :for pattern := (parser:node-match-branch-pattern branch)
+                     :for branch-env := (make-tc-env :env (tc-env-env env)
+                                                     :ty-table (alexandria:copy-hash-table (tc-env-ty-table env)))
                      :collect (multiple-value-bind (pat-ty preds_ pat-node subs_)
-                                  (infer-pattern-type pattern expr-ty subs env)
-                                (declare (ignore pat-ty preds_))
-                                (nconc branch-subs (list subs_))
-                                pat-node)))
+                                  (infer-pattern-type pattern expr-ty subs branch-env)
+                                (declare (ignore pat-ty))
+                                (list :pat-node pat-node
+                                      :branch-subs subs_
+                                      :pat-preds preds_
+                                      :pat-env-ty-table (tc-env-ty-table branch-env)))))
 
              (ret-ty (tc:make-variable))
 
              ;; Infer the type of each branch, unifying against ret-ty
              (branch-body-nodes
                (loop :for branch :in (parser:node-match-branches node)
-                     :for subs-branch :in branch-subs
-                     :for branch-ret-ty := (tc:apply-substitution subs-branch ret-ty)
+                     :for branch-dat :in branch-data
+                     :for subs-branch := (getf branch-dat :branch-subs)
+                     :for pat-preds := (tc:apply-substitution subs-branch (getf branch-dat :pat-preds))
+                     :for branch-ret-ty := (tc:apply-substitution subs-branch expected-type)
                      :for orig-ty-table := (tc-env-ty-table env)
-                     :for branch-table := (alexandria:copy-hash-table orig-ty-table)
+                     :for branch-table := (getf branch-dat :pat-env-ty-table)
                      :for branch-env := (make-tc-env :env (tc-env-env env)
                                                      :ty-table branch-table)
                      :for body := (parser:node-match-branch-body branch)
@@ -688,14 +692,15 @@ Returns (VALUES INFERRED-TYPE PREDICATES NODE SUBSTITUTIONS)")
                      :collect (multiple-value-bind (body-ty preds_ accessors_ body-node subs_)
                                   (infer-expression-type body branch-ret-ty subs branch-env)
                                 (declare (ignore body-ty))
-                                (setf subs subs_)
-                                (setf preds (append preds preds_))
+                                (setf subs (tc:compose-substitution-lists subs_ subs))
+                                (setf preds (append preds pat-preds preds_))
                                 (setf accessors (append accessors accessors_))
                                 body-node)))
 
              (branch-nodes
                (loop :for branch :in (parser:node-match-branches node)
-                     :for pat-node :in pat-nodes
+                     :for branch-dat :in branch-data
+                     :for pat-node := (getf branch-dat :pat-node)
                      :for branch-body-node :in branch-body-nodes
                      :collect (make-node-match-branch
                                :pattern pat-node
