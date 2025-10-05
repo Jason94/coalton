@@ -65,6 +65,7 @@
   (unless (source:location pred)
     (util:coalton-bug "Predicate ~S does not have source information" pred))
 
+  (break)
   (tc-error "Ambiguous predicate" (tc-note pred "Ambiguous predicate ~S" pred)))
 
 (defun error-unknown-pred (pred)
@@ -685,6 +686,9 @@ Returns (VALUES INFERRED-TYPE PREDICATES NODE SUBSTITUTIONS)")
                      :for branch-env := (make-tc-env :env (tc-env-env env)
                                                      :ty-table branch-table)
                      :for body := (parser:node-match-branch-body branch)
+                     ;; DEBUG
+                     :do (format t "branch:~a~%" (parser:node-match-branch-pattern branch))
+                     :do (format t "branch data:~a~%" branch-dat)
                      :do (maphash (lambda (name scheme)
                                     (setf (gethash name branch-table)
                                           (tc:apply-substitution subs-branch scheme)))
@@ -2083,6 +2087,8 @@ Returns (VALUES INFERRED-TYPE PREDS NODE SUBSTITUTIONS)")
             ;; Split predicates into retained and deferred
             (multiple-value-bind (deferred-preds retained-preds)
                 (tc:split-context (tc-env-env env) env-tvars preds subs)
+
+              (format t "deferred-preds:~a~%retained-preds~a~%" deferred-preds retained-preds)
 
               (let* (;; Calculate defaultable predicates
                      (defaultable-preds

@@ -88,6 +88,9 @@ Furthermore, `best-approx` returns the simplest fraction, and both functions may
     "Returns the integer closest/equal to `x` that is within `0` and `x`."
     (match (proper x)
       ((Tuple t _) t)))
+  )
+
+(coalton-toplevel
 
   (declare round ((Quantizable :a) (Num :a) => :a -> Integer))
   (define (round x)
@@ -98,8 +101,7 @@ Furthermore, `best-approx` returns the simplest fraction, and both functions may
          ;; Negative r
          ((GT)
           ;; r <=> -0.5
-          (let s = (+ (* 2 r) 1))
-          (match (<=> (abs (floor s)) (abs (ceiling s)))
+          (match (<=> (abs (floor (+ (* 2 r) 1))) (abs (ceiling (+ (* 2 r) 1))))
             ((LT) n)
             ((GT) (- n 1))
             ;; r = -0.5
@@ -109,8 +111,7 @@ Furthermore, `best-approx` returns the simplest fraction, and both functions may
          ;; Positive r
          ((LT)
           ;; r <=> 0.5
-          (let s = (- (* 2 r) 1))
-          (match (<=> (abs (floor s)) (abs (ceiling s)))
+          (match (<=> (abs (floor (- (* 2 r) 1))) (abs (ceiling (- (* 2 r) 1))))
             ((LT) (+ n 1))
             ((GT) n)
             ;; r = 0.5
@@ -119,6 +120,9 @@ Furthermore, `best-approx` returns the simplest fraction, and both functions may
                       (+ n 1)))))
          ;; Zero r
          ((EQ) n)))))
+  )
+
+(coalton-toplevel
 
   (define (rational-approx precision x)
     "Implemention of `real-approx' for rationals."
