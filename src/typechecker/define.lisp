@@ -693,14 +693,17 @@ Returns (VALUES INFERRED-TYPE PREDICATES NODE SUBSTITUTIONS)")
                                     (setf (gethash name branch-table)
                                           (tc:apply-substitution subs-branch scheme)))
                                   orig-ty-table)
+                     :do (maphash (lambda (name scheme)
+                                    (setf (gethash name branch-table)
+                                          (tc:apply-substitution subs-branch scheme)))
+                                  branch-table)
                      :collect (multiple-value-bind (body-ty preds_ accessors_ body-node subs_)
                                   (infer-expression-type body branch-ret-ty subs branch-env)
                                 (declare (ignore body-ty))
                                 (setf subs (tc:compose-substitution-lists subs_ subs))
-                                (setf preds (append preds pat-preds preds_))
-                                ;; (setf preds (append preds
-                                ;;                     pat-preds
-                                ;;                     (tc:apply-substitution subs_ preds_)))
+                                (setf preds (append preds
+                                                    pat-preds
+                                                    (tc:apply-substitution subs_ preds_)))
                                 (setf accessors (append accessors accessors_))
                                 body-node)))
 
@@ -2077,6 +2080,7 @@ Returns (VALUES INFERRED-TYPE PREDS NODE SUBSTITUTIONS)")
 
                  (expr-preds (tc:apply-substitution subs expr-preds))
 
+                 (_ (format t "preds before entailment removal ~a~%" preds))
                  (preds (remove-if
                          (lambda (p) (tc:entail (tc-env-env env) expr-preds p))
                          (tc:apply-substitution subs preds))))
