@@ -698,6 +698,9 @@ Returns (VALUES INFERRED-TYPE PREDICATES NODE SUBSTITUTIONS)")
                                 (declare (ignore body-ty))
                                 (setf subs (tc:compose-substitution-lists subs_ subs))
                                 (setf preds (append preds pat-preds preds_))
+                                ;; (setf preds (append preds
+                                ;;                     pat-preds
+                                ;;                     (tc:apply-substitution subs_ preds_)))
                                 (setf accessors (append accessors accessors_))
                                 body-node)))
 
@@ -2028,7 +2031,10 @@ Returns (VALUES INFERRED-TYPE PREDS NODE SUBSTITUTIONS)")
         (setf subs (nth-value 1 (tc:solve-fundeps (tc-env-env env) preds subs)))
 
         (let* ((expr-type (tc:apply-substitution subs fresh-type))
+               (_ (format t "subs before applying to preds: ~a~%" subs))
                (expr-preds (tc:apply-substitution subs fresh-preds))
+               ;; DEBUG
+               (_ (format t "preds after applying subs: ~a~%" preds))
 
                (env-tvars (tc-env-bindings-variables env bound-variables))
                (local-tvars (set-difference (remove-duplicates
@@ -2042,6 +2048,7 @@ Returns (VALUES INFERRED-TYPE PREDS NODE SUBSTITUTIONS)")
                (output-scheme (tc:quantify local-tvars output-qual-type)))
 
           (let* ((expr-preds (tc:apply-substitution subs expr-preds))
+                 (_ (format t "expr-preds after applying subs ~a~%" expr-preds))
 
                  (known-variables
                    (tc:apply-substitution
@@ -2049,6 +2056,8 @@ Returns (VALUES INFERRED-TYPE PREDS NODE SUBSTITUTIONS)")
                     (append
                      (remove-duplicates (tc:type-variables expr-type) :test #'tc:ty=)
                      env-tvars)))
+
+                 (_ (format t "known-variables ~a~%" known-variables))
 
                  (preds (tc:apply-substitution subs preds))
 
@@ -2072,6 +2081,8 @@ Returns (VALUES INFERRED-TYPE PREDS NODE SUBSTITUTIONS)")
                          (lambda (p) (tc:entail (tc-env-env env) expr-preds p))
                          (tc:apply-substitution subs preds))))
 
+            (format t "preds after entailment removal ~a~%" preds)
+
             (setf local-tvars
                   (expand-local-tvars env-tvars
                                       local-tvars
@@ -2085,6 +2096,7 @@ Returns (VALUES INFERRED-TYPE PREDS NODE SUBSTITUTIONS)")
                                       (tc-env-env env)))
 
             ;; Split predicates into retained and deferred
+            (format t "preds before splitting context: ~a~%" preds)
             (multiple-value-bind (deferred-preds retained-preds)
                 (tc:split-context (tc-env-env env) env-tvars preds subs)
 
@@ -2099,6 +2111,7 @@ Returns (VALUES INFERRED-TYPE PREDS NODE SUBSTITUTIONS)")
                             retained-preds)
 
                          (tc:ambiguous-constraint (e)
+                           ;; (break)
                            (error-ambiguous-pred (tc:ambiguous-constraint-pred e)))))
 
                      ;; Defaultable predicates are not retained
