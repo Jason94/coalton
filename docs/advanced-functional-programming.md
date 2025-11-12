@@ -8,7 +8,7 @@ This guide documents some advanced techniques to do functional programming at a 
 
 This guide does assume some basic familiarity with Monads and `do` notation, but will try to explain everything thoroughly beyond that.
 
-## Defining Your Own Effects
+## Defining Your Own Effects (Free Monads)
 
 Coalton comes with several monads, particularly `State` and `Env`, that are useful in many applications. But it doesn't come with any monads that allow you to perform side-effects, such as terminal IO. Instead, Coalton gives you a tool called a Free Monad that lets you easily build your own.
 
@@ -91,7 +91,7 @@ We can use this to run our `prompt-name` program and get back the result:
 (coalton (run-terminal! prompt-name))
 ```
 
-## Using Multiple Effects
+## Using Multiple Effects (Monad Transformers)
 
 With the `Terminal` monad, we can write programs that do terminal IO. We can achieve other effects with other monads, such as using `ST` to model mutable state:
 
@@ -144,7 +144,7 @@ Here, `MyState` is the type of the state the program is storing, and `:a` is the
 
 This is what we would _like_ to write, but it will throw a compile error. Remember, the type signature of `write-line` is: `(declare write-line (String -> Terminal Unit))`. It returns a `Terminal` monad. However, the `do` block in `prompt-and-store-name` is expecting a `StateT (ListName) Terminal` (which is itself a monad, albeit a much more complicated one). The error message looks complicated, but it's just telling us that `write-line` is returning one type, but it was expected to return a different type by the caller.
 
-To fix this, we need to make use of the `lift` function that the `MonadTransformer` typeclass gives us. `lift` turns an operation on the "inner" monad (`Terminal` in this case) into an operation on the whole monad transformer. In this caes, it transforms a `Terminal` -> `StateT (List Name) Terminal`, which is what we need. So this will compile and work as expected:
+To fix this, we need to make use of the `lift` function that the `MonadTransformer` typeclass gives us. `lift` turns an operation on the "inner" monad (`Terminal` in this case) into an operation on the whole monad transformer. Here, it transforms a `Terminal` -> `StateT (List Name) Terminal`, which is what we need. So this will compile and work as expected:
 ```lisp
 (coalton-toplevel
   (declare prompt-and-store-name-fixed (StateT (List Name) Terminal Unit))
