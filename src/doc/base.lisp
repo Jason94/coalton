@@ -60,7 +60,7 @@ SYMBOL is *the* external symbol that PACKAGE resolves for SYMBOL-NAME. This avoi
 matching unrelated symbols from other packages that merely share the same name."
   (multiple-value-bind (resolved status)
       (find-symbol (symbol-name symbol) package)
-    (and (eql :external status)
+    (and (eq ':external status)
          (eq resolved symbol)
          (or (not check-package)
              (eq (symbol-package symbol) package)))))
