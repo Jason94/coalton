@@ -1,0 +1,52 @@
+(in-package #:coalton-native-tests)
+
+(coalton-toplevel
+
+  (declare program-put (m-c:MonadState Integer :m => Void -> :m Unit))
+  (define (program-put)
+    (do
+     (m-c:put 10)
+     (m-c:put 100)
+     (m-c:put 1000)))
+
+  (declare program-modify (m-c:MonadState Integer :m => Void -> :m Unit))
+  (define (program-modify)
+    (do
+     (m-c:modify (fn (x) (+ x 10)))
+     (m-c:modify (fn (x) (+ x 100)))
+     (m-c:modify (fn (x) (+ x 1000)))))
+
+  (declare program-get (m-c:MonadState Integer :m => Void -> :m Integer))
+  (define (program-get)
+    (do
+     m-c:get
+     m-c:get
+     m-c:get))
+
+  (declare log-program-to-list (m-sl:StateLogger Integer (st:ST Integer) :a -> List (Tuple Integer Integer)))
+  (define (log-program-to-list program)
+    (let logged = (cell:new Nil))
+    (let append-new-state = (fn (old new)
+                              (cell:push! logged (Tuple old new))
+                              (values)))
+    (m-sl:run-st-logged append-new-state 0 program)
+    (reverse (cell:read logged))))
+
+(define-test test-state-logger-put ()
+  (let result = (log-program-to-list (program-put)))
+  (is (== (make-list (Tuple 0 10)
+                     (Tuple 10 100)
+                     (Tuple 100 1000))
+          result)))
+
+(define-test test-state-logger-modify ()
+  (let result = (log-program-to-list (program-modify)))
+  (is (== (make-list (Tuple 0 10)
+                     (Tuple 10 110)
+                     (Tuple 110 1110))
+          result)))
+
+(define-test test-state-logger-get ()
+  (let result = (log-program-to-list (program-get)))
+  (is (== Nil
+          result)))

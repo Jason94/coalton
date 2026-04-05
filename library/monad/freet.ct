@@ -154,6 +154,7 @@ functor `f` at a time."
       (bind x f)))
 
   (define-instance (Functor :f => MonadTransformer (FreeT :f))
+    (inline)
     (define (lift m)
       (FreeT (map Val m))))
 

@@ -108,7 +108,8 @@
                              (:ct-file "resultt")
                              (:ct-file "optionalt")
                              (:ct-file "free")
-                             (:ct-file "freet")))
+                             (:ct-file "freet")
+                             (:ct-file "state-logger")))
                ;; Unfortunately this had to be split from the rest of the
                ;; experimental files because of intermediate dependencies.
                (:module "experimental-do-control"
@@ -327,7 +328,8 @@
                 :components ((:ct-file "optionalt")
                              (:ct-file "resultt")
                              (:ct-file "environment")
-                             (:ct-file "statet")))
+                             (:ct-file "statet")
+                             (:ct-file "state-logger-tests")))
                (:module "algorithms-tests"
                 :serial t
                 :components ((:file "fft-tests")))

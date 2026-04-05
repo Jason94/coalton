@@ -1,0 +1,92 @@
+(coalton/utils:defstdlib-package #:coalton/monad/state-logger
+  (:use
+   #:coalton
+   #:coalton/builtin
+   #:coalton/classes
+   #:coalton/functions
+   #:coalton/monad/classes)
+  (:local-nicknames
+   (:f #:coalton/monad/free)
+   (:ft #:coalton/monad/freet)
+   (:s #:coalton/monad/state))
+  (:export
+   #:StateLogger
+   #:run-logged
+   #:run-st-logged
+  ))
+
+(in-package #:coalton/monad/state-logger)
+
+#+coalton-release
+(cl:declaim #.coalton-impl/settings:*coalton-optimize-library*)
+
+(coalton-toplevel
+  (repr :lisp)
+  (define-type (StateLoggerF :s :next)
+    (GetF (:s -> :next))
+    (PutF :s :next)
+    (ModifyF (:s -> :s) :next))
+
+  (declare %map ((:next-a -> :next-b) * StateLoggerF :s :next-a -> StateLoggerF :s :next-b))
+  (define (%map f st-op)
+    (match st-op
+      ((GetF cont)
+       (GetF (map f cont)))
+      ((PutF st next)
+       (PutF st (f next)))
+      ((ModifyF f-st next)
+       (ModifyF f-st (f next)))))
+
+  (define-instance (Functor (StateLoggerF :s))
+    (inline)
+    (define (map f op)
+      (%map f op)))
+  
+  (define-type-alias (StateLogger :s) (ft:FreeT (StateLoggerF :s)))
+
+  (define-instance (MonadState :s :m => MonadState :s (StateLogger :s :m))
+    (define get
+      (f:liftF (GetF id)))
+    (define (put s)
+      (f:liftF (PutF s Unit)))
+    (define (modify f-st)
+      (f:liftF (ModifyF f-st Unit))))
+
+  (declare run-logged (MonadState :s :m => (:s * :s -> Void) * StateLogger :s :m :a -> :m :a))
+  (define (run-logged log-fn program)
+    (do
+     (step <- (ft:unwrap-freeT program))
+     (match step
+       ((ft:Val a)
+        (pure a))
+       ((ft:FreeF next)
+        (match next
+          ((GetF cont)
+           (do
+            (st <- get)
+            (run-logged log-fn (cont st))))
+          ((PutF new-st next)
+           (do
+            (old-st <- get)
+            (pure (progn
+                    (log-fn old-st new-st)
+                    Unit))
+            (put new-st)
+            (run-logged log-fn next)))
+          ((ModifyF f-st next)
+           (do
+            (st <- get)
+            (let new-st = (f-st st))
+            (pure (progn
+                    (log-fn st new-st)
+                    Unit))
+            (put new-st)
+            (run-logged log-fn next))))))))
+
+  (declare run-st-logged ((:s * :s -> Void) * :s * StateLogger :s (s:ST :s) :a -> Tuple :s :a))
+  (define (run-st-logged log-fn initial-st program)
+    (s:run (run-logged log-fn program) initial-st))
+  )
+
+#+sb-package-locks
+(sb-ext:lock-package "COALTON/MONAD/STATE-LOGGER")
