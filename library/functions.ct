@@ -88,10 +88,10 @@ Print a line to `cl:*standard-output*` in the form \"{STR}: {ITEM}\"."
     x)
 
   (inline)
-  (declare const (:a -> (:b -> :a)))
+  (declare const (:a -> (Void -> :a)))
   (define (const a)
     "A function that always returns its first argument."
-    (fn (_b) a))
+    (fn () a))
 
   (inline)
   (declare flip ((:a * :b -> :c) -> (:b * :a -> :c)))
