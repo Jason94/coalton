@@ -47,6 +47,7 @@
     ;; :any', to pass to `tree:lookup' or `tree:remove'. A `OrdMap' will never hold a `JustKey'.
     (JustKey :key))
 
+  (declare key (MapPair :k :v -> :k))
   (define (key pair)
     (match pair
       ((MapPair k _) k)

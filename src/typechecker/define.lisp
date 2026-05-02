@@ -2389,9 +2389,25 @@ Returns (VALUES INFERRED-TYPE PREDICATES NODE SUBSTITUTIONS)")
                                subs
                                env)
 
-      (format *error-output* "~&MATCH enter loc=~S branches=~D subs=~D env-table=~D~%" (source:location node) (length (parser:node-match-branches node)) (length subs) (hash-table-count (tc-env-ty-table env)))
       (let* (;; Infer the type of each pattern, unifying against expr-ty, specialized for
              ;; any branch-specific refinements from a GADT constructor.
+             (match-base-subs subs)
+
+             ;; After checking this branch pattern, which substitutions were learned specifically
+             ;; from this branch?
+             (branch-only-subs
+               (lambda (after before)
+                 (remove-if
+                  (lambda (sub)
+                    (find sub
+                          before
+                          :test (lambda (a b)
+                                  (and (tc:ty= (tc:substitution-from a)
+                                               (tc:substitution-from b))
+                                       (tc:ty= (tc:substitution-to a)
+                                               (tc:substitution-to b))))))
+                  after)))
+
              (branch-data
                (loop :for branch :in (parser:node-match-branches node)
                      :for pattern := (parser:node-match-branch-pattern branch)
@@ -2401,7 +2417,9 @@ Returns (VALUES INFERRED-TYPE PREDICATES NODE SUBSTITUTIONS)")
                                   (infer-pattern-type pattern expr-ty subs branch-env)
                                 (declare (ignore pat-ty))
                                 (list :pat-node pat-node
-                                      :branch-subs subs_
+                                      :branch-subs (funcall branch-only-subs
+                                                            subs_
+                                                            match-base-subs)
                                       :pat-preds preds_
                                       :pat-env-ty-table (tc-env-ty-table branch-env)))))
 
@@ -2411,33 +2429,22 @@ Returns (VALUES INFERRED-TYPE PREDICATES NODE SUBSTITUTIONS)")
              (branch-body-nodes
                (loop :for branch :in (parser:node-match-branches node)
                      :for branch-dat :in branch-data
-                     :for subs-branch := (getf branch-dat :branch-subs)
-                     :for pat-preds := (tc:apply-substitution subs-branch (getf branch-dat :pat-preds))
-                     :for branch-ret-ty := (tc:apply-substitution subs-branch expected-type)
+                     :for branch-subs := (getf branch-dat :branch-subs)
+                     :for subs-for-branch-body := (tc:compose-substitution-lists branch-subs subs)
+                     :for pat-preds := (tc:apply-substitution subs-for-branch-body (getf branch-dat :pat-preds))
+                     :for branch-ret-ty := (tc:apply-substitution subs-for-branch-body expected-type)
                      :for branch-table := (getf branch-dat :pat-env-ty-table)
                      :for branch-env := (make-tc-env :env (tc-env-env env)
                                                      :ty-table branch-table)
                      :for body := (parser:node-match-branch-body branch)
                      :do (maphash (lambda (name scheme)
                                     (setf (gethash name branch-table)
-                                          (tc:apply-substitution subs-branch scheme)))
+                                          (tc:apply-substitution subs-for-branch-body scheme)))
                                   branch-table)
-                     :do (format *error-output*
-                                 "~&MATCH body-enter loc=~S outer-subs=~D branch-subs=~D branch-table=~D~%"
-                                 (source:location (parser:node-body-last-node body))
-                                 (length subs)
-                                 (length subs-branch)
-                                 (hash-table-count branch-table))
                      :collect (multiple-value-bind (body-ty preds_ accessors_ body-node subs_)
-                                  (infer-expression-type body branch-ret-ty subs branch-env)
+                                  (infer-expression-type body branch-ret-ty subs-for-branch-body branch-env)
                                 (declare (ignore body-ty))
                                 (setf subs subs_)
-                                (format *error-output*
-                                        "~&MATCH body-exit loc=~S body-subs=~D composed-subs=~D preds=~D~%"
-                                        (source:location (parser:node-body-last-node body))
-                                        (length subs_)
-                                        (length subs)
-                                        (length preds))
                                 (setf preds (append preds
                                                     pat-preds
                                                     (tc:apply-substitution subs_ preds_)))
