@@ -22,6 +22,9 @@
    #:reduce-context                     ; FUNCTION
    #:split-context                      ; FUNCTION
    #:default-preds                      ; FUNCTION
+   #:*builder-class-cache*              ; VARIABLE
+   #:default-builder-subs               ; FUNCTION
+   #:expand-defaulted-builder-preds     ; FUNCTION
    #:default-subs                       ; FUNCTION
    ))
 
@@ -30,7 +33,6 @@
 ;;
 ;; Context reduction
 ;;
-
 
 (defun true (x)
   (if x
@@ -61,13 +63,17 @@ Returns (PREDS FOUNDP)"
   (declare (type environment env)
            (type ty-predicate pred)
            (values ty-predicate-list boolean))
-  (fset:do-seq (inst (lookup-class-instances env (ty-predicate-class pred) :no-error t))
+  (dolist (inst (lookup-class-instances env (ty-predicate-class pred) :no-error t))
     (handler-case
         (let* ((subs (predicate-match (ty-class-instance-predicate inst) pred))
                (resulting-preds (mapcar (lambda (p) (apply-substitution subs p))
                                         (ty-class-instance-constraints-expanded inst env))))
           (return-from by-inst (values resulting-preds t)))
       (predicate-unification-error () nil)))
+  (multiple-value-bind (preds foundp)
+      (synthesized-class-instance-constraints pred)
+    (when foundp
+      (return-from by-inst (values preds t))))
   (values nil nil))
 
 (defun entail (env preds pred)
@@ -121,7 +127,7 @@ Returns (VALUES deferred-preds retained-preds defaultable-preds)"
   (let ((reduced-preds (reduce-context env preds subs)))
 
     (loop :for p :in reduced-preds
-          :if (every (lambda (tv) (member tv environment-vars :test #'equalp))
+          :if (every (lambda (tv) (member tv environment-vars :test #'ty=))
                      (type-variables p))
             :collect p :into deferred
           :else
@@ -145,12 +151,100 @@ Returns (VALUES deferred-preds retained-preds defaultable-preds)"
            (type ty-predicate-list preds)
            (values ambiguity-list)
            (ignore env))
-  (loop :for v :in (set-difference (type-variables preds) tvars :test #'equalp)
+  (loop :for v :in (set-difference (type-variables preds) tvars :test #'ty=)
         :for preds_ := (remove-if-not
                         (lambda (pred)
-                          (find v (type-variables pred) :test #'equalp))
+                          (find v (type-variables pred) :test #'ty=))
                         preds)
         :collect (make-ambiguity :var v :preds preds_)))
+
+(defun lookup-type-constructor (env package name)
+  (let* ((symbol (first (util:find-symbol? name package)))
+         (entry (and symbol
+                     (lookup-type env symbol :no-error t))))
+    (and entry
+         (type-entry-type entry))))
+
+;; Cached builder class symbols to avoid repeated FIND-SYMBOL? lookups.
+(defvar *builder-class-cache* nil
+  "Plist cache for builder class symbols, reset at the start of each defaulting pass.")
+
+(defun cached-builder-symbol (key fallback)
+  (or (getf *builder-class-cache* key)
+      (let ((sym (funcall fallback)))
+        (setf (getf *builder-class-cache* key) sym)
+        sym)))
+
+(defun builder-default-candidates (env ambig)
+  (let* ((var (ambiguity-var ambig))
+         (from-itemized-collection (cached-builder-symbol
+                                    :from-itemized-collection
+                                    (lambda ()
+                                      (first (util:find-symbol? "FROMITEMIZEDCOLLECTION"
+                                                                "COALTON/CLASSES")))))
+         (from-collection-comprehension (cached-builder-symbol
+                                         :from-collection-comprehension
+                                         (lambda ()
+                                           (first (util:find-symbol? "FROMCOLLECTIONCOMPREHENSION"
+                                                                     "COALTON/CLASSES")))))
+         (from-itemized-association (cached-builder-symbol
+                                     :from-itemized-association
+                                     (lambda ()
+                                       (first (util:find-symbol? "FROMITEMIZEDASSOCIATION"
+                                                                 "COALTON/CLASSES")))))
+         (from-association-comprehension (cached-builder-symbol
+                                          :from-association-comprehension
+                                          (lambda ()
+                                            (first (util:find-symbol? "FROMASSOCIATIONCOMPREHENSION"
+                                                                      "COALTON/CLASSES")))))
+         (seq-type (cached-builder-symbol
+                    :seq-type
+                    (lambda () (lookup-type-constructor env "COALTON/SEQ" "SEQ"))))
+         (tuple-type (cached-builder-symbol
+                      :tuple-type
+                      (lambda () (lookup-type-constructor env "COALTON/CLASSES" "TUPLE")))))
+    (loop :for pred :in (ambiguity-preds ambig)
+          :for types := (ty-predicate-types pred)
+          :when (and from-itemized-collection
+                     seq-type
+                     (eq (ty-predicate-class pred) from-itemized-collection)
+                     (>= (length types) 3)
+                     (ty= var (first types)))
+            :do (multiple-value-bind (default-type)
+                    (apply-type-argument seq-type (second types))
+                  (return (list default-type)))
+          :when (and from-collection-comprehension
+                     seq-type
+                     (eq (ty-predicate-class pred) from-collection-comprehension)
+                     (>= (length types) 3)
+                     (ty= var (first types)))
+            :do (multiple-value-bind (default-type)
+                    (apply-type-argument seq-type (second types))
+                  (return (list default-type)))
+          :when (and from-itemized-association
+                     seq-type
+                     tuple-type
+                     (eq (ty-predicate-class pred) from-itemized-association)
+                     (>= (length types) 4)
+                     (ty= var (first types)))
+            :do (multiple-value-bind (tuple-entry-type)
+                    (apply-type-argument-list tuple-type (list (second types)
+                                                               (third types)))
+                  (multiple-value-bind (default-type)
+                      (apply-type-argument seq-type tuple-entry-type)
+                    (return (list default-type))))
+          :when (and from-association-comprehension
+                     seq-type
+                     tuple-type
+                     (eq (ty-predicate-class pred) from-association-comprehension)
+                     (>= (length types) 4)
+                     (ty= var (first types)))
+            :do (multiple-value-bind (tuple-entry-type)
+                    (apply-type-argument-list tuple-type (list (second types)
+                                                               (third types)))
+                  (multiple-value-bind (default-type)
+                      (apply-type-argument seq-type tuple-entry-type)
+                    (return (list default-type)))))))
 
 (defun candidates (env ambig)
   (declare (type environment env)
@@ -161,32 +255,33 @@ Returns (VALUES deferred-preds retained-preds defaultable-preds)"
          (pred-names (mapcar #'ty-predicate-class preds)) ; is
          (pred-heads (mapcar #'ty-predicate-types preds)) ; ts
          )
-    (loop :for type :in (defaults env)
+    (or (builder-default-candidates env ambig)
+        (loop :for type :in (defaults env)
 
-          :when (and
-                 ;; Check that for the predicates containing VAR, VAR is their only type variable
-                 ;;
-                 ;; NOTE: Haskell has a much stricter check here. Haskell requires that the predicate
-                 ;; is in the form "Pred [var]". Coalton will default the following other predicates
-                 ;;
-                 ;; * multiple variable classes "Pred [var var]" and "Pred [var String]"
-                 ;; * more complex types "Pred [List var]"
-                 (subsetp (type-variables pred-heads) (list var) :test #'equalp)
+              :when (and
+                     ;; Check that for the predicates containing VAR, VAR is their only type variable
+                     ;;
+                     ;; NOTE: Haskell has a much stricter check here. Haskell requires that the predicate
+                     ;; is in the form "Pred [var]". Coalton will default the following other predicates
+                     ;;
+                     ;; * multiple variable classes "Pred [var var]" and "Pred [var String]"
+                     ;; * more complex types "Pred [List var]"
+                     (subsetp (type-variables pred-heads) (list var) :test #'ty=)
 
-                 ;; Check that at least one predicate is a numeric class
-                 (some (lambda (name)
-                         (find name (num-classes) :test #'equalp))
-                       pred-names)
+                     ;; Check that at least one predicate is a numeric class
+                     (some (lambda (name)
+                             (find name (num-classes) :test #'equalp))
+                           pred-names)
 
-                 ;; NOTE: Haskell checks that all predicates are stdlib classes here
+                     ;; NOTE: Haskell checks that all predicates are stdlib classes here
 
-                 ;; Check that the variable would be defaulted to a valid type
-                 ;; for the given predicates
-                 (every (lambda (name)
-                          (entail env nil (make-ty-predicate :class name :types (list type))))
-                        pred-names))
+                     ;; Check that the variable would be defaulted to a valid type
+                     ;; for the given predicates
+                     (every (lambda (name)
+                              (entail env nil (make-ty-predicate :class name :types (list type))))
+                            pred-names))
 
-            :collect type)))
+                :collect type))))
 
 (defun defaults (env)
   (declare (type environment env)
@@ -197,12 +292,12 @@ Returns (VALUES deferred-preds retained-preds defaultable-preds)"
 (defun num-classes ()
   ;; Lookup class symbols if they exist. This allows defaulting to
   ;; work before the standard library is fully loaded
-  (append (util:find-symbol? "NUM" "COALTON-LIBRARY/CLASSES")
-          (util:find-symbol? "QUANTIZABLE" "COALTON-LIBRARY/MATH")
-          (util:find-symbol? "RECIPROCABLE" "COALTON-LIBRARY/MATH")
-          (util:find-symbol? "COMPLEX" "COALTON-LIBRARY/MATH")
-          (util:find-symbol? "REMAINDER" "COALTON-LIBRARY/MATH")
-          (util:find-symbol? "INTEGRAL" "COALTON-LIBRARY/MATH")))
+  (append (util:find-symbol? "NUM" "COALTON/CLASSES")
+          (util:find-symbol? "QUANTIZABLE" "COALTON/MATH")
+          (util:find-symbol? "RECIPROCABLE" "COALTON/MATH")
+          (util:find-symbol? "COMPLEX" "COALTON/MATH")
+          (util:find-symbol? "REMAINDER" "COALTON/MATH")
+          (util:find-symbol? "INTEGRAL" "COALTON/MATH")))
 
 (defun default-preds (env tvars preds)
   (declare (type environment env)
@@ -218,6 +313,55 @@ Returns (VALUES deferred-preds retained-preds defaultable-preds)"
         
         :when candidates
           :append (ambiguity-preds ambig)))
+
+(defun default-builder-subs (env tvars preds)
+  (declare (type environment env)
+           (type tyvar-list tvars)
+           (type ty-predicate-list preds)
+           (values substitution-list &optional))
+  (loop :for ambig :in (ambiguities env tvars preds)
+        :for candidates := (builder-default-candidates env ambig)
+        :when candidates
+          :collect (make-substitution :from (ambiguity-var ambig)
+                                      :to (first candidates))))
+
+(defun expand-defaulted-builder-preds (env preds)
+  (declare (type environment env)
+           (type ty-predicate-list preds)
+           (values ty-predicate-list &optional))
+  (let ((from-itemized-collection (cached-builder-symbol
+                                   :from-itemized-collection
+                                   (lambda ()
+                                     (first (util:find-symbol? "FROMITEMIZEDCOLLECTION"
+                                                               "COALTON/CLASSES")))))
+        (from-collection-comprehension (cached-builder-symbol
+                                        :from-collection-comprehension
+                                        (lambda ()
+                                          (first (util:find-symbol? "FROMCOLLECTIONCOMPREHENSION"
+                                                                    "COALTON/CLASSES")))))
+        (from-itemized-association (cached-builder-symbol
+                                    :from-itemized-association
+                                    (lambda ()
+                                      (first (util:find-symbol? "FROMITEMIZEDASSOCIATION"
+                                                                "COALTON/CLASSES")))))
+        (from-association-comprehension (cached-builder-symbol
+                                         :from-association-comprehension
+                                         (lambda ()
+                                           (first (util:find-symbol? "FROMASSOCIATIONCOMPREHENSION"
+                                                                     "COALTON/CLASSES"))))))
+    (loop :for pred :in preds
+          :for class := (ty-predicate-class pred)
+          :if (or (eq class from-itemized-collection)
+                  (eq class from-collection-comprehension)
+                  (eq class from-itemized-association)
+                  (eq class from-association-comprehension))
+            :append (multiple-value-bind (inst-preds foundp)
+                        (by-inst env pred)
+                      (if foundp
+                          inst-preds
+                          (list pred)))
+          :else
+            :collect pred)))
 
 (defun default-subs (env tvars preds)
   (declare (type environment env)
@@ -273,7 +417,7 @@ For example, consider the following,
 (define-class (C :a :b => D :a :b)
   (m :a))
 
-(declare f (D :a :b => Unit -> :a))
+(declare f (D :a :b => (Void -> :a)))
 (define (f) m)
 ```
 
@@ -294,7 +438,10 @@ the type variables of the class D.
           :with preds      := (expand preds)
           :with subs       := nil
           :for pred :in preds
-          :for new-subs := (fundep-entail% env expr-preds pred known-tyvars)
+          :for new-subs :=
+            (if (entail env expr-preds pred)
+                '()
+                (fundep-entail% env expr-preds pred known-tyvars))
           :do (setf subs (compose-substitution-lists subs new-subs))
           :finally (return subs))))
 
@@ -359,7 +506,7 @@ respective superclass predicate is passed to this function."
                         ;; We find the expression predicate that is
                         ;; associated with PRED based on KNOWN-TYVARS.
                         (and (eq class-name (ty-predicate-class expr-pred))
-                             (equalp known-indices (known-indices expr-pred))
+                             (subsetp known-indices (known-indices expr-pred))
                              (every #'ty=
                                     (known pred-tys)
                                     (known (ty-predicate-types expr-pred)))))
@@ -367,7 +514,8 @@ respective superclass predicate is passed to this function."
             ;; There should always be an associated expression
             ;; predicate.
             (when (null expr-pred)
-              (util:coalton-bug "There is no matching expression predicate."))
+              (util:coalton-bug
+                (format nil "No expression predicate matches ~a." pred)))
             ;; So, we create substitutions based on the
             ;; newly-determined types.
             (loop :with expr-pred-tys := (ty-predicate-types expr-pred)
@@ -379,4 +527,3 @@ respective superclass predicate is passed to this function."
                              (match from-ty to-ty)
                              new-subs))
                   :finally (return new-subs))))))))
-

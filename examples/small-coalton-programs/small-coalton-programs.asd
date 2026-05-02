@@ -1,11 +1,11 @@
 (asdf:defsystem #:small-coalton-programs
   :depends-on (#:coalton)
+  :defsystem-depends-on ("coalton-asdf")
   :pathname "src/"
   :serial t
   :components ((:file "package")
-               (:file "diff")
+               (:ct-file "diff")
                (:file "primes")
-               (:file "freecalc")
-               (:file "microbench1")
-               (:file "brainfold")
+               (:ct-file "freecalc")
+               (:ct-file "brainfold")
                (:file "monads-bank")))

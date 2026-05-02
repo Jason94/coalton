@@ -33,6 +33,10 @@
    #:make-node-bind                     ; CONSTRUCTOR
    #:node-bind-pattern                  ; ACCESSOR
    #:node-bind-expr                     ; ACCESSOR
+   #:node-values-bind                   ; STRUCT
+   #:make-node-values-bind              ; CONSTRUCTOR
+   #:node-values-bind-patterns          ; ACCESSOR
+   #:node-values-bind-expr              ; ACCESSOR
    #:node-body-element                  ; TYPE
    #:node-body-element-list             ; TYPE
    #:node-body                          ; STRUCT
@@ -42,13 +46,31 @@
    #:node-abstraction                   ; STRUCT
    #:make-node-abstraction              ; CONSTRUCTOR
    #:node-abstraction-params            ; ACCESSOR
+   #:node-abstraction-keyword-params    ; ACCESSOR
    #:node-abstraction-body              ; ACCESSOR
    #:node-abstraction-p                 ; FUNCTION
+   #:keyword-param                      ; STRUCT
+   #:make-keyword-param                 ; CONSTRUCTOR
+   #:keyword-param-keyword              ; ACCESSOR
+   #:keyword-param-value-var            ; ACCESSOR
+   #:keyword-param-supplied-p-var       ; ACCESSOR
+   #:keyword-param-list                 ; TYPE
    #:node-let-binding                   ; STRUCT
    #:make-node-let-binding              ; CONSTRUCTOR
    #:node-let-binding-name              ; ACCESSOR
    #:node-let-binding-value             ; ACCESSOR
    #:node-let-binding-list              ; TYPE
+   #:node-dynamic-binding               ; STRUCT
+   #:make-node-dynamic-binding          ; CONSTRUCTOR
+   #:node-dynamic-binding-name          ; ACCESSOR
+   #:node-dynamic-binding-value         ; ACCESSOR
+   #:node-dynamic-binding-list          ; TYPE
+   #:node-for-binding                  ; STRUCT
+   #:make-node-for-binding             ; CONSTRUCTOR
+   #:node-for-binding-name             ; ACCESSOR
+   #:node-for-binding-init             ; ACCESSOR
+   #:node-for-binding-step             ; ACCESSOR
+   #:node-for-binding-list             ; TYPE
    #:node-let-declare                   ; STRUCT
    #:make-node-let-declare              ; CONSTRUCTOR
    #:node-let-declare-name              ; ACCESSOR
@@ -59,9 +81,12 @@
    #:node-let-bindings                  ; ACCESSOR
    #:node-let-declares                  ; ACCESSOR
    #:node-let-body                      ; ACCESSOR
+   #:node-dynamic-let                   ; STRUCT
+   #:make-node-dynamic-let              ; CONSTRUCTOR
+   #:node-dynamic-let-bindings          ; ACCESSOR
+   #:node-dynamic-let-subexpr           ; ACCESSOR
    #:node-lisp                          ; STRUCT
    #:make-node-lisp                     ; CONSTRUCTOR
-   #:node-lisp-type                     ; ACCESSOR
    #:node-lisp-vars                     ; ACCESSOR
    #:node-lisp-var-names                ; ACCESSOR
    #:node-lisp-body                     ; ACCESSOR
@@ -95,13 +120,24 @@
    #:node-progn                         ; STRUCT
    #:make-node-progn                    ; CONSTRUCTOR
    #:node-progn-body                    ; ACCESSOR
+   #:node-unsafe                        ; STRUCT
+   #:make-node-unsafe                   ; CONSTRUCTOR
+   #:node-unsafe-body                   ; ACCESSOR
+   #:node-block                         ; STRUCT
+   #:make-node-block                    ; CONSTRUCTOR
+   #:node-block-name                    ; ACCESSOR
+   #:node-block-body                    ; ACCESSOR
    #:node-the                           ; STRUCT
    #:make-node-the                      ; CONSTRUCTOR
    #:node-the-type                      ; ACCESSOR
    #:node-the-expr                      ; ACCESSOR
-   #:node-return                        ; STRUCT
-   #:make-node-return                   ; CONSTRUCTOR
-   #:node-return-expr                   ; ACCESSOR
+   #:node-return-from                   ; STRUCT
+   #:make-node-return-from              ; CONSTRUCTOR
+   #:node-return-from-name              ; ACCESSOR
+   #:node-return-from-expr              ; ACCESSOR
+   #:node-values                        ; STRUCT
+   #:make-node-values                   ; CONSTRUCTOR
+   #:node-values-nodes                  ; ACCESSOR
    #:node-throw                         ; STRUCT
    #:make-node-throw                    ; CONSTRUCTOR
    #:node-throw-expr                    ; ACCESSOR
@@ -112,6 +148,12 @@
    #:make-node-application              ; CONSTRUCTOR
    #:node-application-rator             ; ACCESSOR
    #:node-application-rands             ; ACCESSOR
+   #:node-application-keyword-rands     ; ACCESSOR
+   #:node-application-keyword-arg       ; STRUCT
+   #:make-node-application-keyword-arg  ; CONSTRUCTOR
+   #:node-application-keyword-arg-keyword ; ACCESSOR
+   #:node-application-keyword-arg-value ; ACCESSOR
+   #:node-application-keyword-arg-list  ; TYPE
    #:node-or                            ; STRUCT
    #:make-node-or                       ; CONSTRUCTOR
    #:node-or-nodes                      ; ACCESSOR
@@ -131,27 +173,15 @@
    #:make-node-unless                   ; CONSTRUCTOR
    #:node-unless-expr                   ; ACCESSOR
    #:node-unless-body                   ; ACCESSOR
-   #:node-while                         ; STRUCT
-   #:make-node-while                    ; CONSTRUCTOR
-   #:node-while-label                   ; ACCESSOR
-   #:node-while-expr                    ; ACCESSOR
-   #:node-while-body                    ; ACCESSOR
-   #:node-while-let                     ; STRUCT
-   #:make-node-while-let                ; CONSTRUCTOR
-   #:node-while-let-label               ; ACCESSOR
-   #:node-while-let-pattern             ; ACCESSOR 
-   #:node-while-let-expr                ; ACCESSOR
-   #:node-while-let-body                ; ACCESSOR
-   #:node-for                           ; STRUCT
-   #:make-node-for                      ; CONSTRUCTOR
-   #:node-for-label                     ; ACCESSOR
-   #:node-for-pattern                   ; ACCESSOR 
-   #:node-for-expr                      ; ACCESSOR
-   #:node-for-body                      ; ACCESSOR
-   #:node-loop                          ; STRUCT
-   #:make-node-loop                     ; CONSTRUCTOR
-   #:node-loop-label                    ; ACCESSOR
-   #:node-loop-body                     ; ACCESSOR
+   #:node-for                          ; STRUCT
+   #:make-node-for                     ; CONSTRUCTOR
+   #:node-for-label                    ; ACCESSOR
+   #:node-for-bindings                 ; ACCESSOR
+   #:node-for-sequential-p             ; ACCESSOR
+   #:node-for-returns                  ; ACCESSOR
+   #:node-for-termination-kind         ; ACCESSOR
+   #:node-for-termination-expr         ; ACCESSOR
+   #:node-for-body                     ; ACCESSOR
    #:node-break                         ; STRUCT
    #:make-node-break                    ; CONSTRUCTOR
    #:node-break-label                   ; ACCESSOR
@@ -236,8 +266,17 @@
 (defmethod source:location ((self node-bind))
   (node-bind-location self))
 
+(defstruct (node-values-bind
+            (:copier nil))
+  (patterns (util:required 'patterns)  :type pattern-list    :read-only t)
+  (expr     (util:required 'expr)      :type node            :read-only t)
+  (location (util:required 'location)  :type source:location :read-only t))
+
+(defmethod source:location ((self node-values-bind))
+  (node-values-bind-location self))
+
 (deftype node-body-element ()
-  '(or node node-bind))
+  '(or node node-bind node-values-bind))
 
 (defun node-body-element-p (x)
   (typep x 'node-body-element))
@@ -254,11 +293,26 @@
   (nodes     (util:required 'nodes)     :type node-body-element-list :read-only t)
   (last-node (util:required 'last-node) :type node                   :read-only t))
 
+(defstruct (keyword-param
+            (:copier nil))
+  (keyword        (util:required 'keyword)        :type keyword          :read-only t)
+  (value-var      (util:required 'value-var)      :type parser:identifier :read-only t)
+  (supplied-p-var (util:required 'supplied-p-var) :type parser:identifier :read-only t))
+
+(eval-when (:load-toplevel :compile-toplevel :execute)
+  (defun keyword-param-list-p (x)
+    (and (alexandria:proper-list-p x)
+         (every #'keyword-param-p x))))
+
+(deftype keyword-param-list ()
+  '(satisfies keyword-param-list-p))
+
 (defstruct (node-abstraction
             (:include node)
             (:copier nil))
-  (params  (util:required 'params) :type pattern-list :read-only t)
-  (body    (util:required 'body)   :type node-body    :read-only t))
+  (params         (util:required 'params)         :type pattern-list      :read-only t)
+  (keyword-params nil                             :type keyword-param-list :read-only t)
+  (body           (util:required 'body)           :type node-body         :read-only t))
 
 (defstruct (node-let-binding
             (:copier nil))
@@ -276,11 +330,50 @@
 (deftype node-let-binding-list ()
   '(satisfies node-let-binding-list-p))
 
+(defstruct (node-dynamic-binding
+            (:copier nil))
+  (name     (util:required 'name)     :type node-variable   :read-only t)
+  (value    (util:required 'value)    :type node            :read-only t)
+  (location (util:required 'location) :type source:location :read-only t))
+
+(defmethod source:location ((self node-dynamic-binding))
+  (node-dynamic-binding-location self))
+
+(defun node-dynamic-binding-list-p (x)
+  (and (alexandria:proper-list-p x)
+       (every #'node-dynamic-binding-p x)))
+
+(deftype node-dynamic-binding-list ()
+  '(satisfies node-dynamic-binding-list-p))
+
+(defstruct (node-for-binding
+            (:copier nil))
+  (name     (util:required 'name)     :type node-variable   :read-only t)
+  (init     (util:required 'init)     :type node            :read-only t)
+  (step     nil                       :type (or null node)  :read-only t)
+  (location (util:required 'location) :type source:location :read-only t))
+
+(defmethod source:location ((self node-for-binding))
+  (node-for-binding-location self))
+
+(defun node-for-binding-list-p (x)
+  (and (alexandria:proper-list-p x)
+       (every #'node-for-binding-p x)))
+
+(deftype node-for-binding-list ()
+  '(satisfies node-for-binding-list-p))
+
 (defstruct (node-let
             (:include node)
             (:copier nil))
   (bindings (util:required 'bindings) :type node-let-binding-list :read-only t)
   (body     (util:required 'body)     :type node-body             :read-only t))
+
+(defstruct (node-dynamic-let
+            (:include node)
+            (:copier nil))
+  (bindings (util:required 'bindings) :type node-dynamic-binding-list :read-only t)
+  (subexpr  (util:required 'subexpr)  :type node                      :read-only t))
 
 (defstruct (node-lisp
             (:include node)
@@ -316,13 +409,32 @@
             (:copier nil))
   (body (util:required 'body) :type node-body :read-only t))
 
-;; node-the does not exist in this AST!
-
-(defstruct (node-return
+(defstruct (node-unsafe
             (:include node)
             (:copier nil))
-  ;; Either the returned expression or null in the case of "(return)"
-  (expr (util:required 'expr) :type (or null node) :read-only t))
+  (body (util:required 'body) :type node-body :read-only t))
+
+;; node-the does not exist in this AST!
+
+(defstruct (node-block
+            (:include node)
+            (:copier nil))
+  (name (util:required 'name) :type symbol    :read-only t)
+  (body (util:required 'body) :type node-body :read-only t))
+
+(defstruct (node-return-from
+            (:include node)
+            (:copier nil))
+  (name (util:required 'name) :type symbol :read-only t)
+  ;; Bare (return) is rewritten to a zero-value NODE-VALUES during
+  ;; control-flow resolution, so the returned expression is always explicit.
+  (expr (util:required 'expr) :type node   :read-only t))
+
+(defstruct (node-values
+            (:include node)
+            (:copier nil))
+  ;; Multiple values expression, lowered directly by codegen.
+  (nodes (util:required 'nodes) :type node-list :read-only t))
 
 (defstruct (node-throw
             (:include node)
@@ -383,8 +495,22 @@
 (defstruct (node-application
             (:include node)
             (:copier nil))
-  (rator (util:required 'rator) :type node      :read-only t)
-  (rands (util:required 'rands) :type node-list :read-only t))
+  (rator         (util:required 'rator) :type node      :read-only t)
+  (rands         (util:required 'rands) :type node-list :read-only t)
+  (keyword-rands nil                    :type node-application-keyword-arg-list :read-only t))
+
+(defstruct (node-application-keyword-arg
+            (:copier nil))
+  (keyword (util:required 'keyword) :type keyword :read-only t)
+  (value   (util:required 'value)   :type node    :read-only t))
+
+(eval-when (:load-toplevel :compile-toplevel :execute)
+  (defun node-application-keyword-arg-list-p (x)
+    (and (alexandria:proper-list-p x)
+         (every #'node-application-keyword-arg-p x))))
+
+(deftype node-application-keyword-arg-list ()
+  '(satisfies node-application-keyword-arg-list-p))
 
 (defstruct (node-or
             (:include node)
@@ -415,34 +541,16 @@
   (expr (util:required 'expr) :type node      :read-only t)
   (body (util:required 'body) :type node-body :read-only t))
 
-(defstruct (node-while
-            (:include node)
-            (:copier nil))
-  (label (util:required 'label) :type keyword   :read-only t)
-  (expr  (util:required 'expr)  :type node      :read-only t)
-  (body  (util:required 'body)  :type node-body :read-only t))
-
-(defstruct (node-while-let
-            (:include node)
-            (:copier nil))
-  (label   (util:required 'label)   :type keyword   :read-only t)
-  (pattern (util:required 'pattern) :type pattern   :read-only t)
-  (expr    (util:required 'expr)    :type node      :read-only t)
-  (body    (util:required 'body)    :type node-body :read-only t))
-
 (defstruct (node-for
             (:include node)
             (:copier nil))
-  (label   (util:required 'label)   :type keyword   :read-only t)
-  (pattern (util:required 'pattern) :type pattern   :read-only t)
-  (expr    (util:required 'expr)    :type node      :read-only t)
-  (body    (util:required 'body)    :type node-body :read-only t))
-
-(defstruct (node-loop
-            (:include node)
-            (:copier nil))
-  (label (util:required 'label) :type keyword   :read-only t)
-  (body  (util:required 'body)  :type node-body :read-only t))
+  (label            (util:required 'label)            :type keyword                        :read-only t)
+  (bindings         (util:required 'bindings)         :type node-for-binding-list         :read-only t)
+  (sequential-p     nil                               :type boolean                        :read-only t)
+  (returns          nil                               :type (or null node)                 :read-only t)
+  (termination-kind nil                               :type (member nil :while :until :repeat) :read-only t)
+  (termination-expr nil                               :type (or null node)                 :read-only t)
+  (body             (util:required 'body)             :type node-body                      :read-only t))
 
 (defstruct (node-break
             (:include node)
@@ -485,7 +593,7 @@
   (node-do-bind-location self))
 
 (deftype node-do-body-element ()
-  '(or node node-bind node-do-bind))
+  '(or node node-bind node-values-bind node-do-bind))
 
 (defun node-do-body-element-p (x)
   (typep x 'node-do-body-element))
@@ -547,6 +655,14 @@
    :expr (tc:apply-substitution subs (node-bind-expr node))
    :location (source:location node)))
 
+(defmethod tc:apply-substitution (subs (node node-values-bind))
+  (declare (type tc:substitution-list subs)
+           (values node-values-bind))
+  (make-node-values-bind
+   :patterns (tc:apply-substitution subs (node-values-bind-patterns node))
+   :expr (tc:apply-substitution subs (node-values-bind-expr node))
+   :location (source:location node)))
+
 (defmethod tc:apply-substitution (subs (node node-body))
   (declare (type tc:substitution-list subs)
            (values node-body))
@@ -561,6 +677,7 @@
    :type (tc:apply-substitution subs (node-type node))
    :location (source:location node)
    :params (tc:apply-substitution subs (node-abstraction-params node))
+   :keyword-params (node-abstraction-keyword-params node)
    :body (tc:apply-substitution subs (node-abstraction-body node))))
 
 (defmethod tc:apply-substitution (subs (node node-let-binding))
@@ -571,6 +688,23 @@
    :value (tc:apply-substitution subs (node-let-binding-value node))
    :location (source:location node)))
 
+(defmethod tc:apply-substitution (subs (node node-dynamic-binding))
+  (declare (type tc:substitution-list subs)
+           (values node-dynamic-binding))
+  (make-node-dynamic-binding
+   :name (tc:apply-substitution subs (node-dynamic-binding-name node))
+   :value (tc:apply-substitution subs (node-dynamic-binding-value node))
+   :location (source:location node)))
+
+(defmethod tc:apply-substitution (subs (node node-for-binding))
+  (declare (type tc:substitution-list subs)
+           (values node-for-binding))
+  (make-node-for-binding
+   :name (tc:apply-substitution subs (node-for-binding-name node))
+   :init (tc:apply-substitution subs (node-for-binding-init node))
+   :step (tc:apply-substitution subs (node-for-binding-step node))
+   :location (source:location node)))
+
 (defmethod tc:apply-substitution (subs (node node-let))
   (declare (type tc:substitution-list subs)
            (values node-let))
@@ -579,6 +713,15 @@
    :location (source:location node)
    :bindings (tc:apply-substitution subs (node-let-bindings node))
    :body (tc:apply-substitution subs (node-let-body node))))
+
+(defmethod tc:apply-substitution (subs (node node-dynamic-let))
+  (declare (type tc:substitution-list subs)
+           (values node-dynamic-let))
+  (make-node-dynamic-let
+   :type (tc:apply-substitution subs (node-type node))
+   :location (source:location node)
+   :bindings (tc:apply-substitution subs (node-dynamic-let-bindings node))
+   :subexpr (tc:apply-substitution subs (node-dynamic-let-subexpr node))))
 
 (defmethod tc:apply-substitution (subs (node node-lisp))
   (declare (type tc:substitution-list subs)
@@ -649,13 +792,39 @@
    :location (source:location node)
    :body (tc:apply-substitution subs (node-progn-body node))))
 
-(defmethod tc:apply-substitution (subs (node node-return))
+(defmethod tc:apply-substitution (subs (node node-unsafe))
   (declare (type tc:substitution-list subs)
-           (values node-return))
-  (make-node-return
+           (values node-unsafe))
+  (make-node-unsafe
    :type (tc:apply-substitution subs (node-type node))
    :location (source:location node)
-   :expr (tc:apply-substitution subs (node-return-expr node))))
+   :body (tc:apply-substitution subs (node-unsafe-body node))))
+
+(defmethod tc:apply-substitution (subs (node node-block))
+  (declare (type tc:substitution-list subs)
+           (values node-block))
+  (make-node-block
+   :type (tc:apply-substitution subs (node-type node))
+   :location (source:location node)
+   :name (node-block-name node)
+   :body (tc:apply-substitution subs (node-block-body node))))
+
+(defmethod tc:apply-substitution (subs (node node-return-from))
+  (declare (type tc:substitution-list subs)
+           (values node-return-from))
+  (make-node-return-from
+   :type (tc:apply-substitution subs (node-type node))
+   :location (source:location node)
+   :name (node-return-from-name node)
+   :expr (tc:apply-substitution subs (node-return-from-expr node))))
+
+(defmethod tc:apply-substitution (subs (node node-values))
+  (declare (type tc:substitution-list subs)
+           (values node-values))
+  (make-node-values
+   :type (tc:apply-substitution subs (node-type node))
+   :location (source:location node)
+   :nodes (tc:apply-substitution subs (node-values-nodes node))))
 
 (defmethod tc:apply-substitution (subs (node node-application))
   (declare (type tc:substitution-list subs)
@@ -664,7 +833,15 @@
    :type (tc:apply-substitution subs (node-type node))
    :location (source:location node)
    :rator (tc:apply-substitution subs (node-application-rator node))
-   :rands (tc:apply-substitution subs (node-application-rands node))))
+   :rands (tc:apply-substitution subs (node-application-rands node))
+   :keyword-rands (tc:apply-substitution subs (node-application-keyword-rands node))))
+
+(defmethod tc:apply-substitution (subs (node node-application-keyword-arg))
+  (declare (type tc:substitution-list subs)
+           (values node-application-keyword-arg))
+  (make-node-application-keyword-arg
+   :keyword (node-application-keyword-arg-keyword node)
+   :value (tc:apply-substitution subs (node-application-keyword-arg-value node))))
 
 (defmethod tc:apply-substitution (subs (node node-throw))
   (declare (type tc:substitution-list subs)
@@ -726,27 +903,6 @@
    :expr (tc:apply-substitution subs (node-unless-expr node))
    :body (tc:apply-substitution subs (node-unless-body node))))
 
-(defmethod tc:apply-substitution (subs (node node-while))
-  (declare (type tc:substitution-list subs)
-           (values node-while))
-  (make-node-while
-   :type (tc:apply-substitution subs (node-type node))
-   :location (source:location node)
-   :label (node-while-label node)
-   :expr (tc:apply-substitution subs (node-while-expr node))
-   :body (tc:apply-substitution subs (node-while-body node))))
-
-(defmethod tc:apply-substitution (subs (node node-while-let))
-  (declare (type tc:substitution-list subs)
-           (values node-while-let))
-  (make-node-while-let
-   :type (tc:apply-substitution subs (node-type node))
-   :location (source:location node)
-   :label (node-while-let-label node)
-   :pattern (tc:apply-substitution subs (node-while-let-pattern node))
-   :expr (tc:apply-substitution subs (node-while-let-expr node))
-   :body (tc:apply-substitution subs (node-while-let-body node))))
-
 (defmethod tc:apply-substitution (subs (node node-for))
   (declare (type tc:substitution-list subs)
            (values node-for))
@@ -754,18 +910,12 @@
    :type (tc:apply-substitution subs (node-type node))
    :location (source:location node)
    :label (node-for-label node)
-   :pattern (tc:apply-substitution subs (node-for-pattern node))
-   :expr (tc:apply-substitution subs (node-for-expr node))
+   :bindings (tc:apply-substitution subs (node-for-bindings node))
+   :sequential-p (node-for-sequential-p node)
+   :returns (tc:apply-substitution subs (node-for-returns node))
+   :termination-kind (node-for-termination-kind node)
+   :termination-expr (tc:apply-substitution subs (node-for-termination-expr node))
    :body (tc:apply-substitution subs (node-for-body node))))
-
-(defmethod tc:apply-substitution (subs (node node-loop))
-  (declare (type tc:substitution-list subs)
-           (values node-loop))
-  (make-node-loop
-   :type (tc:apply-substitution subs (node-type node))
-   :location (source:location node)
-   :label (node-loop-label node)
-   :body (tc:apply-substitution subs (node-loop-body node))))
 
 (defmethod tc:apply-substitution (subs (node node-break))
   (declare (type tc:substitution-list subs)

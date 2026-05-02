@@ -49,9 +49,9 @@
   (:export
    #:-> #:→
    #:=> #:⇒
+   #:forall
    #:∀
    #:Unit
-   #:Void
    #:Boolean #:True #:False
    #:Char
    #:Bit
@@ -80,26 +80,28 @@
   (:export
    #:fn #:λ
    #:Type
+   #:&key
    #:match
+   #:type-of
    #:throw
    #:resume-to
    #:resumable
    #:catch
+   #:dynamic-bind
    #:let
+   #:let*
    #:rec
    #:=                                  ; Syntax
    #:lisp
    #:<-                                 ; Syntax
    #:_
+   #:values
    #:return
    #:the
-   #:while
-   #:while-let
-   #:loop
+   #:for
+   #:for*
    #:break
    #:continue
-   #:for
-   #:in                                 ; Syntax
    )
 
   ;; Macros
@@ -131,8 +133,9 @@
    #:print-specializations
    #:lookup-code
    #:lookup-class
+   #:lookup-type
+   #:lookup-runtime-type
    #:lookup-fundeps
-   #:type-of
    #:describe-type-of
    #:describe-type-alias
    #:set-type-printing-mode
@@ -144,3 +147,9 @@
    #:Boolean/True
    #:Boolean/False
    #:Unit/Unit))
+
+(defpackage #:coalton++
+  (:documentation "Experimental features of Coalton.")
+  (:use)
+  (:export
+   #:unsafe))

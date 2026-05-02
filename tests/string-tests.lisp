@@ -19,12 +19,18 @@
   (is (== (substring "foobar" 3 6)
           "bar")))
 
-(define-test string-split ()
+(define-test string-split-at ()
   (let str = "teststring")
-  (is (== (string:split 1 str)
+  (is (== (string:split-at 1 str)
           (Tuple "t" "eststring")))
-  (is (== (string:split 4 str)
+  (is (== (string:split-at 4 str)
           (Tuple "test" "string"))))
+
+(define-test string-split ()
+  (is (== (string:split #\, "test,string,test")
+          (make-list "test" "string" "test")))
+  (is (== (string:split #\, "test,,string")
+          (make-list "test" "" "string"))))
 
 (define-test strip-fixes ()
   (is (== (string:strip-prefix "pre" "prefix")
@@ -51,7 +57,8 @@
           None)))
 
 (define-test string-substring-finders ()
-  (let find-foo = (string:substring-index "foo"))
+  (let find-foo = (fn (haystack)
+                    (string:substring-index "foo" haystack)))
   (is (== (Some 0) (find-foo "foo")))
   (is (== (Some 0) (find-foo "foo bar")))
   (is (== (Some 4) (find-foo "bar foo")))
@@ -60,11 +67,13 @@
   (is (== None (find-foo "bar")))
   (is (== None (find-foo "bar baz quux")))
 
-  (let find-empty-string = (string:substring-index ""))
+  (let find-empty-string = (fn (haystack)
+                             (string:substring-index "" haystack)))
   (is (== (Some 0) (find-empty-string "")))
   (is (== (Some 0) (find-empty-string "foo")))
 
-  (let has-foo? = (string:substring? "foo"))
+  (let has-foo? = (fn (haystack)
+                    (string:substring? "foo" haystack)))
   (is (has-foo? "foo"))
   (is (has-foo? "foo bar"))
   (is (has-foo? "bar foo"))
@@ -73,7 +82,8 @@
   (is (not (has-foo? "bar")))
   (is (not (has-foo? "bar baz quux")))
 
-  (let has-empty? = (string:substring? ""))
+  (let has-empty? = (fn (haystack)
+                      (string:substring? "" haystack)))
   (is (has-empty? ""))
   (is (has-empty? "foo")))
 
@@ -85,3 +95,10 @@
   (is (== down (string:downcase mixed)))
   (is (== up (string:upcase down)))
   (is (== up (string:upcase mixed))))
+
+(define-test string-into-vector-char-has-fill-pointer ()
+  (let vec = (the (Vector Char) (into "wow")))
+  (is (== (Some #\w) (vector:pop! vec)))
+  (is (== (vector:make #\w #\o) vec))
+  (vector:push! #\! vec)
+  (is (== (vector:make #\w #\o #\!) vec)))

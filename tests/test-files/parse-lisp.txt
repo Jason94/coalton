@@ -15,7 +15,7 @@ error: Malformed lisp expression
    |                 ^ expected expression type
 
 ================================================================================
-101 Missing binding list
+101 Legacy lisp return type rejected
 ================================================================================
 
 (package test-package)
@@ -24,14 +24,14 @@ error: Malformed lisp expression
 
 --------------------------------------------------------------------------------
 
-error: Malformed lisp expression
-  --> test:3:24
+error: Malformed lisp return type
+  --> test:3:19
    |
  3 |  (define f (lisp (T -> T)))
-   |                          ^ expected binding list
+   |                     ^^ nothing may appear to the left of `->` in a `lisp` return type
 
 ================================================================================
-102 Missing body
+102 Legacy lisp return type rejected before body parsing
 ================================================================================
 
 (package test-package)
@@ -40,8 +40,91 @@ error: Malformed lisp expression
 
 --------------------------------------------------------------------------------
 
-error: Malformed lisp expression
-  --> test:3:10
+error: Malformed lisp return type
+  --> test:3:19
    |
  3 |  (define f (lisp (T -> T) (x y)))
-   |            ^^^^^^^^^^^^^^^^^^^^^ expected body
+   |                     ^^ nothing may appear to the left of `->` in a `lisp` return type
+
+================================================================================
+103 Legacy keyword values rejected
+================================================================================
+
+(package test-package)
+
+(define f (lisp :values))
+
+--------------------------------------------------------------------------------
+
+error: Malformed lisp return type
+  --> test:3:16
+   |
+ 3 |  (define f (lisp :values))
+   |                  ^^^^^^^ use `(-> ...)` return type syntax in `lisp` forms
+
+================================================================================
+106 Single-output lisp arrow return type
+================================================================================
+
+(package test-package)
+
+(define f (lisp (-> Integer) ()
+            1))
+
+================================================================================
+107 Multi-output lisp arrow return type
+================================================================================
+
+(package test-package)
+
+(define (f)
+  (lisp (-> Integer * Integer) ()
+    (cl:values 1 2)))
+
+================================================================================
+108 Legacy keyword value rejected
+================================================================================
+
+(package test-package)
+
+(define f (lisp :value))
+
+--------------------------------------------------------------------------------
+
+error: Malformed lisp return type
+  --> test:3:16
+   |
+ 3 |  (define f (lisp :value))
+   |                  ^^^^^^ use `(-> ...)` return type syntax in `lisp` forms
+
+================================================================================
+109 Legacy symbol rejected
+================================================================================
+
+(package test-package)
+
+(define f (lisp multiple-values-extra))
+
+--------------------------------------------------------------------------------
+
+error: Malformed lisp return type
+  --> test:3:16
+   |
+ 3 |  (define f (lisp multiple-values-extra))
+   |                  ^^^^^^^^^^^^^^^^^^^^^ use `(-> ...)` return type syntax in `lisp` forms
+
+================================================================================
+110 Legacy keyword multiple-values rejected
+================================================================================
+
+(package test-package)
+
+(define f (lisp :multiple-values))
+
+--------------------------------------------------------------------------------
+
+error: Malformed lisp return type
+  --> test:3:16
+   |
+ 3 |  (define f (lisp :multiple-values))
+   |                  ^^^^^^^^^^^^^^^^ use `(-> ...)` return type syntax in `lisp` forms

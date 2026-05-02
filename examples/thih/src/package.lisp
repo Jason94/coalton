@@ -5,10 +5,11 @@
   (:use #:coalton
         #:coalton-prelude)
   (:local-nicknames
-   (#:list #:coalton-library/list))
+   (#:list #:coalton/list))
   (:shadow #:id #:find #:const
            #:type #:compose #:alt
-           #:split #:reduce #:lift)
+           #:split #:reduce #:lift
+           #:forall)
   (:export
    #:Id
    

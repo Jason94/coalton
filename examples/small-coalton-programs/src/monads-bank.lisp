@@ -46,13 +46,16 @@
   (:use
    #:coalton
    #:coalton-prelude
-   #:coalton-library/result
-   #:coalton-library/monad/state
-   #:coalton-library/monad/environment
-   #:coalton-library/monad/resultt)
+   #:coalton/result
+   #:coalton/monad/stateT
+   #:coalton/monad/identity
+   #:coalton/monad/environment
+   #:coalton/monad/resultt
+   #:coalton/experimental/do-control-core)
   (:local-nicknames
-   (#:s #:coalton-library/string)
-   (#:m #:coalton-library/ordmap))
+   (#:iter #:coalton/iterator)
+   (#:s #:coalton/string)
+   (#:m #:coalton/ordmap))
   (:export
    :create-account
    :deposit
@@ -98,11 +101,11 @@
     (name    AccountName)
     (balance Balance))
 
-  (declare add-balance (Amount -> Account -> Account))
+  (declare add-balance (Amount * Account -> Account))
   (define (add-balance amount acc)
     (Account (.name acc) (+ (.balance acc) amount)))
 
-  (declare subtract-balance (Amount -> Account -> Account))
+  (declare subtract-balance (Amount * Account -> Account))
   (define (subtract-balance amount acc)
     (Account (.name acc) (- (.balance acc) amount))))
 
@@ -118,10 +121,15 @@
 
   (declare print-report (BankState -> Unit))
   (define (print-report accounts)
-    (for (Account name balance) in (m:values accounts)
-      (lisp :a (name balance)
-        (cl:format cl:t "Name:~10T~a~%Balance:~10T~a~%~%" name balance)))
-    (lisp :a ()
+    (iter:for-each!
+     (fn (account)
+       (match account
+         ((Account name balance)
+          (lisp (-> :a) (name balance)
+            (cl:format cl:t "Name:~10T~a~%Balance:~10T~a~%~%" name balance))
+          (values))))
+     (m:values-iter accounts))
+    (lisp (-> :a) ()
       (cl:format cl:t "--------~%"))
     Unit))
 
@@ -174,30 +182,35 @@
 
 (coalton-toplevel
   (define-type-alias BankM
-    (EnvT Configuration (ST BankState)))
+    ;; NOTE: Should be changed back from (StateT Identity) -> ST when the inference bugs
+    ;; keeping ST from getting wrapped in MonadState are fixed.
+    ;; See, e.g., https://github.com/coalton-lang/coalton/issues/1656.
+    (EnvT Configuration (StateT BankState Identity)))
 
-  (declare run-bankM (BankM :val -> Configuration -> BankState -> Tuple BankState :val))
+  (declare run-bankM (BankM :val * Configuration * BankState -> Tuple BankState :val))
   (define (run-bankM bankm conf initial-state)
     "Takes BANKM, a BankM computation to run, CONF, an initial configuration, and an initial
 state. Runs the computation, and returns a tuple of the final state and the return value of
 the computation."
-    (run (run-envT bankm conf) initial-state)))
+    (run-identity (run-stateT (run-envT bankm conf) initial-state))))
 
 ;;; Fifth, we define some helper functions.
 
 (coalton-toplevel
-  (declare get-account (AccountName -> BankState -> BankResult Account))
+  (declare get-account (AccountName * BankState -> BankResult Account))
   (define (get-account account-name accounts)
     (opt->result (AccountNotFound account-name) (m:lookup accounts account-name)))
 
   (declare get-accountM (AccountName -> BankM (BankResult Account)))
   (define (get-accountM account-name)
-    (lift (map (get-account account-name) get)))
+    (map (fn (accounts)
+           (get-account account-name accounts))
+         get))
 
   (declare check-account-is-valid (Account -> BankM (BankResult Account)))
   (define (check-account-is-valid account)
     (do
-     (minimum-balance <- (asks-envT .minimum-balance))
+     (minimum-balance <- (asks .minimum-balance))
      (if (>= (.balance account) minimum-balance)
          (pure (Ok account))
          (pure (Err (InvalidAccountBalance (.name account) (.balance account)))))))
@@ -210,8 +223,8 @@ the computation."
      ;; still performing a "side effect" by modifying the state in our BankM monad.
      ;; Here, it's changing the BankState (which is a Map from String -> Account)
      ;; by inserting an account with its name as the key.
-     (lift (modify (fn (mp)
-               (m:insert-or-replace mp (.name acc) acc))))
+     (modify (fn (mp)
+               (m:insert mp (.name acc) acc)))
      (pure (Ok acc)))))
 
 ;;; Finally, we'll create all of the functions that our "user" can use to
@@ -225,97 +238,89 @@ the computation."
   ;;; a series of BankM computations and bail out as soon as we get a BankError.
   ;;; We can do this by wrapping each of our BankM steps in a ResultT and then
   ;;; calling `run-resultT` on the whole thing, which will produce exactly the
-  ;;; `BankM (BankResult Account)` type that we want.
+  ;;; `BankM (BankResult Account)` type that we want. The macro `do-resultT`
+  ;;; does this behind the scenes, eliminating a lot of boilerplate `ResultT`
+  ;;; calls.
   ;;;
   ;;; Most of our top-level functions can follow this pattern.
 
-  (declare create-account (AccountName -> Balance -> BankM (BankResult Account)))
+  (declare create-account (AccountName * Balance -> BankM (BankResult Account)))
   (define (create-account name initial-balance)
     "Adds an account to the BankState and return the created account."
-    (run-resultT
-     (do
-      (accounts <- (lift (lift get)))
-      (ResultT
-       (match (get-account name accounts)
-         ((Err _) (pure (Ok Unit)))
-         ((Ok _) (pure (Err (AccountAlreadyExists name))))))
-      (let unvalidated-account = (Account name initial-balance))
-      (account <- (ResultT (check-account-is-valid unvalidated-account)))
-      (ResultT (set-account account)))))
+    (do
+      (accounts <- get)
+      (do-resultT
+        (match (get-account name accounts)
+          ((Err _) (pure (Ok Unit)))
+          ((Ok _) (pure (Err (AccountAlreadyExists name)))))
+        (let unvalidated-account = (Account name initial-balance))
+        (account <- (check-account-is-valid unvalidated-account))
+        (set-account account))))
 
-  (declare deposit (AccountName -> Amount -> BankM (BankResult Account)))
+  (declare deposit (AccountName * Amount -> BankM (BankResult Account)))
   (define (deposit account-name amount)
     "Deposit AMOUNT into account with ACCOUNT-NAME and return the Account for convenience."
-    (run-resultT
-     (do
-      (err-ifT (< amount 0) (InvalidDeposit amount))
-      (acc <- (ResultT (get-accountM account-name)))
-      (ResultT (set-account (add-balance amount acc))))))
+    (do-resultT
+      (err-ifM (< amount 0) (InvalidDeposit amount))
+      (acc <- (get-accountM account-name))
+      (set-account (add-balance amount acc))))
 
   (declare print-reportM (BankM (BankResult Unit)))
   (define print-reportM
     (do
-     (accounts <- (lift get))
+     (accounts <- get)
      (pure (Ok (print-report accounts)))))
 
-  (declare withdraw (AccountName -> Amount -> BankM (BankResult Account)))
+  (declare withdraw (AccountName * Amount -> BankM (BankResult Account)))
   (define (withdraw account-name amount)
     "Withdraw AMOUNT from account with ACCOUNT-NAME, returning the Account for convenience."
-    (run-resultT
-     (do
-      (err-ifT (< amount 0) (InvalidWithdrawal amount))
-      (acc <- (ResultT (get-accountM account-name)))
-      (map-errT (fn (er)
-                  (Unknown
-                   (s:concat "Cannot withdraw from an invalid account: "
-                             (into er))))
-                (ResultT (check-account-is-valid acc)))
-      (let new-account = (subtract-balance amount acc))
-      (protection? <- (lift (asks-envT .overdraft-protection)))
-      (minimum <- (lift (asks-envT .minimum-balance)))
-      (if (and protection?
-               (< (.balance new-account) minimum))
-          (ResultT
-           (pure (Err (InvalidWithdrawal amount))))
-          (ResultT
-           (set-account new-account))))))
+    (do
+      (protection? <- (asks .overdraft-protection))
+      (minimum <- (asks .minimum-balance))
+      (do-resultT
+        (err-ifM (< amount 0) (InvalidWithdrawal amount))
+        (acc <- (get-accountM account-name))
+        (map-errM
+         (fn (er)
+           (Unknown
+            (s:concat "Cannot withdraw from an invalid account: "
+                      (into er))))
+         (check-account-is-valid acc))
+        (let new-account = (subtract-balance amount acc))
+        (if (and protection?
+                 (< (.balance new-account) minimum))
+            (pure (Err (InvalidWithdrawal amount)))
+            (set-account new-account)))))
 
   ;;; Unlike most of our top-level functions, `transfer` has more complex error handling.
   ;;; Instead of just running everything through a `ResultT`, we manually handle the
   ;;; different errors that can occur and return either an `Err` or `Ok` value.
 
-  (declare transfer (AccountName -> AccountName -> Balance -> BankM (BankResult Unit)))
+  (declare transfer (AccountName * AccountName * Balance -> BankM (BankResult Unit)))
   (define (transfer from-acc-name to-acc-name amount)
     (if (== from-acc-name to-acc-name)
       (pure (Err (RecursiveTransfer from-acc-name)))
-      (do
-        (withdrawal? <- (withdraw from-acc-name amount))
-        (match withdrawal?
-          ((Err er) (pure (Err er)))
-          ((Ok _)
-            (do
-            (deposit? <- (deposit to-acc-name amount))
-            (match deposit?
-              ;; If the deposit failed, put the money back into the from account!
-              ((Err er)
-                (do
-                (deposit from-acc-name amount)
-                (pure (Err er))))
-              ((Ok _) (pure (Ok Unit))))))))))
+      (matchM (withdraw from-acc-name amount)
+        ((Err er)
+         (pure (Err er)))
+        ((Ok _)
+         (matchM (deposit to-acc-name amount)
+           ;; If the deposit failed, put the money back into the from account!
+           ((Err er)
+            (do-resultT
+              (deposit from-acc-name amount)
+              (pure (Err er))))
+           ((Ok _)
+            (pure (Ok Unit))))))))
 
-  (declare close-account (AccountName -> AccountName -> BankM (BankResult Unit)))
+  (declare close-account (AccountName * AccountName -> BankM (BankResult Unit)))
   (define (close-account acc-to-close-name deposit-acc-name)
-    (run-resultT
-     (do
-      (acc-to-close <- (ResultT (get-accountM acc-to-close-name)))
-      (ResultT (local-envT
-                without-overdraft-protection
-                (transfer acc-to-close-name deposit-acc-name (.balance acc-to-close))))
-      (lift (lift (modify (fn (mp)
-                            (with-default
-                              mp
-                              (m:remove mp acc-to-close-name))))))
-      (pure Unit)))))
+    (do-resultT
+      (acc-to-close <- (get-accountM acc-to-close-name))
+      (local
+       without-overdraft-protection
+       (transfer acc-to-close-name deposit-acc-name (.balance acc-to-close)))
+      (okM (modify (fn (mp) (m:remove mp acc-to-close-name)))))))
 
 ;;; Finally, we run our bank simulation! We use the `do-resultT` macro, which
 ;;; wraps a sequence of `ResultT` computations in a single do block and runs them.

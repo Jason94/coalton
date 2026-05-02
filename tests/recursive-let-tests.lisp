@@ -1,7 +1,7 @@
 (in-package #:coalton-tests)
 
 (uiop:define-package #:coalton-tests/recursive-let-tests
-  (:use #:coalton #:coalton-library/classes)
+  (:use #:coalton #:coalton/classes)
   (:export #:MyList #:mylist-zero-circle #:mylist-circle?
 
            #:list-zero-circle))
@@ -14,13 +14,13 @@
       (define-type MyList
         MyNil
         (MyCons IFix MyList))
-      (define (mylist-zero-circle _)
+      (define (mylist-zero-circle)
         (let ((lst (MyCons 0 lst)))
           lst))
       (define (mylist-circle? lst)
         (match lst
           ((MyNil) False)
-          ((MyCons _ tail) (coalton-library/functions:unsafe-pointer-eq? lst tail))))))
+          ((MyCons _ tail) (coalton/functions:unsafe-pointer-eq? lst tail))))))
   ;; hacky eval of quoted form to only compile this code after compiling the previous
   ;; `with-coalton-compilation' form.
   (is (eval '(coalton:coalton (coalton-tests/recursive-let-tests:mylist-circle?
@@ -47,12 +47,64 @@
 
   (check-coalton-types
    "(define foo
-      (let ((loop-times (the (UFix -> Unit)
+      (let ((loop-times (the (UFix -> Void)
                              (fn (n)
                                (unless (== n 0)
                                  (loop-times (- n 1)))))))
         (loop-times 100)))"
-   '("foo" . "Unit")))
+   '("foo" . "Void")))
+
+(deftest rec-does-not-capture-return ()
+  (with-coalton-compilation (:package #:coalton-tests/recursive-let-tests)
+    (coalton-toplevel
+      (declare rec-return-regression (UFix -> UFix))
+      (define (rec-return-regression n)
+        (+ 100
+           (rec go ((i 0))
+             (if (>= i n)
+                 (return i)
+                 (go (+ i 1))))))))
+  (is (= 5
+         (eval '(coalton:coalton
+                 (coalton-tests/recursive-let-tests::rec-return-regression 5))))))
+
+(deftest rec-short-circuit-tail-calls-are-allowed ()
+  (with-coalton-compilation (:package #:coalton-tests/recursive-let-tests)
+    (coalton-toplevel
+      (declare rec-tail-under-and (UFix -> Boolean))
+      (define (rec-tail-under-and n)
+        (rec go ((i 0))
+          (if (>= i n)
+              True
+              (and True
+                   (go (+ i 1))))))
+
+      (declare rec-tail-under-or (UFix -> Boolean))
+      (define (rec-tail-under-or n)
+        (rec go ((i 0))
+          (if (>= i n)
+              True
+              (or False
+                  (go (+ i 1))))))))
+  (is (eval '(coalton:coalton
+              (coalton-tests/recursive-let-tests::rec-tail-under-and 5))))
+  (is (eval '(coalton:coalton
+              (coalton-tests/recursive-let-tests::rec-tail-under-or 5)))))
+
+(deftest rec-catch-tail-calls-are-allowed ()
+  (with-coalton-compilation (:package #:coalton-tests/recursive-let-tests)
+    (coalton-toplevel
+      (declare rec-tail-under-catch (UFix -> UFix * UFix))
+      (define (rec-tail-under-catch n)
+        (rec go ((i 0))
+          (catch (if (>= i n)
+                     (values i (* i i))
+                     (go (+ i 1)))
+            (_ (values 0 0)))))))
+  (is (equal '(5 25)
+             (multiple-value-list
+              (eval '(coalton:coalton
+                      (coalton-tests/recursive-let-tests::rec-tail-under-catch 5)))))))
 
 (deftest recursive-let-constant-propagation ()
   "Test that constant let bindings are propagated to the other bindings. See GitHub issue #1442."
@@ -81,3 +133,39 @@
     (is (< (- end start) 1))
     (is (equalp value '(1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0)))))
 
+(deftest sequential-let-star-bindings ()
+  (is (= 1
+         (coalton:coalton
+          (coalton:let* ((a 1)
+                         (b a))
+            b)))))
+
+(deftest sequential-let-star-bindings-are-non-recursive ()
+  (check-coalton-types
+   "(define foo
+      (let ((declare x UFix)
+            (x 1))
+        (let* ((declare x UFix)
+               (x (1+ x)))
+          x)))"
+   '("foo" . "UFix")))
+
+(deftest sequential-let-star-binding-declare-mismatch ()
+  (signals coalton-impl/typechecker:tc-error
+    (check-coalton-types
+     "(define bad
+        (let* ((declare y String)
+               (x 1)
+               (y x))
+          y))")))
+
+(deftest sequential-let-star-self-reference-without-outer-binding-is-unbound ()
+  (let ((msg (collect-compiler-error
+              "(package coalton-test-let-star-errors
+  (import coalton-prelude))
+
+(define bad
+  (let* ((x (1+ x)))
+    x))")))
+    (is (search "Unknown variable" msg))
+    (is (search "(let* ((x (1+ x)))" msg))))

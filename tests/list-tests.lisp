@@ -43,9 +43,25 @@
   (is (== (list:drop 2 x) (make-list 3)))
   (is (== (list:take 2 x) (make-list 1 2))))
 
+(define-test test-split-at ()
+  (is (== (list:split-at 1 x) (Tuple (make-list 1)
+                                     (make-list 2 3))))
+  (is (== (list:split-at 0 x) (Tuple (make-list)
+                                     (make-list 1 2 3))))
+  (is (== (list:split-at 4 x) (Tuple (make-list 1 2 3)
+                                     (make-list)))))
+
+(define-test test-split-around ()
+  (is (== (list:split-around 1 x) (Tuple3 (make-list 1)
+                                          (Some 2)
+                                          (make-list 3))))
+  (is (== (list:split-around 4 x) (Tuple3 (make-list 1 2 3)
+                                          None
+                                          (make-list)))))
+
 (define-test test-search ()
   (is (== (list:find even? x) (Some (the Integer 2))))
-  (is (== (list:find (< 10) x) None))
+  (is (== (list:find (fn (y) (< 10 y)) x) None))
 
   (is (== (list:filter odd? x) (make-list 1 3)))
 
@@ -185,7 +201,7 @@
 (define-test test-reductions ()
 
   (let by-len =
-    (the ((List Integer) -> (List Integer) -> Boolean)
+    (the ((List Integer) * (List Integer) -> Boolean)
          (fn (x y) (> (list:length x) (list:length y)))))
 
   (is (== (list:optimumBy by-len Nil) None))
@@ -204,17 +220,14 @@
   (is (== (list:product Nil) 1))
 
   (is (== (list:all even? x) False))
-  (is (== (list:all (> 10) x) True))
+  (is (== (list:all (fn (y) (> 10 y)) x) True))
 
   (is (== (list:any even? x) True))
-  (is (== (list:any (< 10) x) False))
+  (is (== (list:any (fn (y) (< 10 y)) x) False))
 
   Unit)
 
 (define-test test-combinatorics ()
-  (is (== (list:split #\, "one,two,three") (make-list "one" "two" "three")))
-  (is (== (list:split #\, "one,,three") (make-list "one" "" "three")))
-
   (is (set== (list:perms x)
              (make-list
               (make-list 1 2 3)
@@ -241,9 +254,15 @@
               (make-list 1 3)
               (make-list 2 3)))))
 
+(define-test test-show ()
+  (is (== "#<List [1 2 3]>"
+          (show-as-string x)))
+  (is (== "#<List []>"
+          (show-as-string n))))
+
 (define-test test-instances ()
-  (is (== (map (+ 1) x) (make-list 2 3 4)))
-  (is (== (map (+ 1) x) (make-list 2 3 4)))
+  (is (== (map (fn (y) (+ y 1)) x) (make-list 2 3 4)))
+  (is (== (map (fn (y) (+ y 1)) x) (make-list 2 3 4)))
 
   (is (== x (<> x mempty)))
   (is (== x (<> mempty x)))

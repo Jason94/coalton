@@ -1,6 +1,6 @@
 ;;;; The documentation generator queries the global environment for
 ;;;; entries to emit. These are helper functions that support query by
-;;;; package, and also insulate callers from fset datatypes.
+;;;; package.
 
 (defpackage #:coalton/doc/environment
   (:documentation "Environment access helpers for doc generator.")
@@ -24,25 +24,27 @@
 (in-package #:coalton/doc/environment)
 
 (defun %values (immutable-map)
-  "Coerce an FSET map to a list."
-  (fset:convert 'list (fset:range (algo:immutable-map-data immutable-map))))
+  "Return all values from an immutable-map as a list."
+  (algo:immutable-map-values immutable-map))
 
 (defun %lm-values (immutable-listmap)
-  "Coerce an FSET 'listmap' to a list."
-  (apply #'append
-         (mapcar (lambda (value)
-                   (fset:convert 'list value))
-                 (fset:convert 'list (fset:range (algo:immutable-listmap-data immutable-listmap))))))
+  "Return all values from an immutable-listmap as a flat list."
+  (let ((acc nil))
+    (algo:immutable-listmap-foreach
+     (lambda (k v)
+       (declare (ignore k))
+       (setf acc (append v acc)))
+     immutable-listmap)
+    acc))
 
 (defun value-type (name-entry)
   (tc:lookup-value-type entry:*global-environment*
                         (tc:name-entry-name name-entry)))
 
 (defun class-instances (ty-class)
-  (fset:convert 'list
-                (tc:lookup-class-instances entry:*global-environment*
-                                           (tc:ty-class-name ty-class)
-                                           :no-error t)))
+  (tc:lookup-class-instances entry:*global-environment*
+                             (tc:ty-class-name ty-class)
+                             :no-error t))
 
 (defun struct-entry-p (type-entry)
   (let ((name (tc:type-entry-name type-entry)))
@@ -50,25 +52,27 @@
 
 
 (defun find-classes (&key (environment entry:*global-environment*)
-                          (package nil))
+                          (package nil)
+                          (reexported-symbols nil))
   "Return all class definitions in ENVIRONMENT.
 
 By default the global environment is queried.
 If non-nil, restrict to classes defined in PACKAGE."
   (remove-if (lambda (type-entry)
                (and package
-                    (not (exported-symbol-p (tc:ty-class-name type-entry) package t))))
+                    (not (exported-symbol-p (tc:ty-class-name type-entry) package (not reexported-symbols)))))
              (%values (tc:environment-class-environment environment))))
 
 (defun find-types (&key (environment entry:*global-environment*)
-                        (package nil))
+                        (package nil)
+                        (reexported-symbols nil))
   "Return all type definitions in ENVIRONMENT.
 
 By default the global environment is queried.
 If non-nil, restrict to types defined in PACKAGE."
   (remove-if (lambda (type-entry)
                (and package
-                    (not (exported-symbol-p (tc:type-entry-name type-entry) package t))))
+                    (not (exported-symbol-p (tc:type-entry-name type-entry) package (not reexported-symbols)))))
              (%values (tc:environment-type-environment environment))))
 
 (defun find-constructors (&key (environment entry:*global-environment*)
@@ -84,7 +88,8 @@ If non-nil, restrict to constructors defined in PACKAGE."
 
 (defun find-names (&key (environment entry:*global-environment*)
                         (type nil)
-                        (package nil))
+                        (package nil)
+                        (reexported-symbols nil))
   "Return all names in ENVIRONMENT.
 
 By default the global environment is queried.
@@ -93,7 +98,7 @@ If non-nil, restrict to names defined in PACKAGE."
                (or (and type
                         (not (eql type (tc:name-entry-type entry))))
                    (and package
-                        (not (exported-symbol-p (tc:name-entry-name entry) package t)))))
+                        (not (exported-symbol-p (tc:name-entry-name entry) package (not reexported-symbols))))))
              (%values (tc:environment-name-environment environment))))
 
 (defun find-instances (&key (environment entry:*global-environment*)

@@ -25,6 +25,7 @@
    #:generic-closure
    #:+fundep-max-depth+)
   (:local-nicknames
+   (#:avl #:coalton-impl/algorithm/avl-tree)
    (#:util #:coalton-impl/util)
    (#:source #:coalton-impl/source)
    (#:parser #:coalton-impl/parser))
@@ -32,12 +33,15 @@
    #:*update-hook*                          ; VARIABLE
    #:value-environment                      ; STRUCT
    #:explicit-repr                          ; TYPE
+   #:variance-list                          ; TYPE
    #:type-entry                             ; STRUCT
    #:make-type-entry                        ; CONSTRUCTOR
    #:type-entry-name                        ; ACCESSOR
+   #:type-entry-source-name                 ; ACCESSOR
    #:type-entry-runtime-type                ; ACCESSOR
    #:type-entry-type                        ; ACCESSOR
    #:type-entry-tyvars                      ; ACCESSOR
+   #:type-entry-variances                   ; ACCESSOR
    #:type-entry-constructors                ; ACCESSOR
    #:type-entry-explicit-repr               ; ACCESSOR
    #:type-entry-enum-repr                   ; ACCESSOR
@@ -48,6 +52,7 @@
    #:constructor-entry                      ; STRUCT
    #:make-constructor-entry                 ; ACCESSOR
    #:constructor-entry-name                 ; ACCESSOR
+   #:constructor-entry-source-name          ; ACCESSOR
    #:constructor-entry-arity                ; ACCESSOR
    #:constructor-entry-constructs           ; ACCESSOR
    #:constructor-entry-classname            ; ACCESSOR
@@ -57,6 +62,7 @@
    #:type-alias-entry                       ; STRUCT
    #:make-type-alias-entry                  ; CONSTRUCTOR
    #:type-alias-entry-name                  ; ACCESSOR
+   #:type-alias-entry-source-name           ; ACCESSOR
    #:type-alias-entry-tyvars                ; ACCESSOR
    #:type-alias-entry-type                  ; ACCESSOR
    #:type-alias-entry-list                  ; ACCESSOR
@@ -70,6 +76,7 @@
    #:struct-entry                           ; STRUCT
    #:make-struct-entry                      ; CONSTRUCTOR
    #:struct-entry-name                      ; ACCESSOR
+   #:struct-entry-source-name               ; ACCESSOR
    #:struct-entry-fields                    ; ACCESSOR
    #:struct-entry-list                      ; TYPE
    #:struct-environment                     ; STRUCT
@@ -78,9 +85,12 @@
    #:make-ty-class-method                   ; CONSTRUCTOR
    #:ty-class-method-name                   ; ACCESSOR
    #:ty-class-method-type                   ; ACCESSOR
+   #:ty-class-method-outer-tvars            ; ACCESSOR
+   #:ty-class-method-explicit-tvars         ; ACCESSOR
    #:ty-class                               ; STRUCT
    #:make-ty-class                          ; CONSTRUCTOR
    #:ty-class-name                          ; ACCESSOR
+   #:ty-class-source-name                   ; ACCESSOR
    #:ty-class-predicate                     ; ACCESSOR
    #:ty-class-superclasses                  ; ACCESSOR
    #:ty-class-class-variables               ; ACCESSOR
@@ -98,6 +108,7 @@
    #:ty-class-instance-codegen-sym          ; ACCESSOR
    #:ty-class-instance-method-codegen-syms  ; ACCESSOR
    #:ty-class-instance-method-codegen-inline-p ; ACCESSOR
+   #:ty-class-instance-location             ; ACCESSOR
    #:ty-class-instance-constraints-expanded ; FUNCTION
    #:ty-class-instance-list                 ; TYPE
    #:instance-environment                   ; STRUCT
@@ -162,6 +173,7 @@
    #:unset-name                             ; FUNCTION
    #:lookup-class-instances                 ; FUNCTION
    #:lookup-class-instance                  ; FUNCTION
+   #:synthesized-class-instance-constraints ; FUNCTION
    #:lookup-instance-by-codegen-sym         ; FUNCTION
    #:lookup-function-source-parameter-names ; FUNCTION
    #:set-function-source-parameter-names    ; FUNCTION
@@ -181,6 +193,7 @@
    #:collect-fundep-vars                    ; FUNCTION
    #:update-instance-fundeps                ; FUNCTION
    #:solve-fundeps                          ; FUNCTION
+   #:synchronize-type-variable-counter      ; FUNCTION
    ))
 
 ;;;;
@@ -245,16 +258,14 @@
 (declaim (sb-ext:freeze-type value-environment))
 
 (defmethod apply-substitution (subst-list (env value-environment))
-  (make-value-environment :data (fset:image (lambda (key value)
-                  (values key (apply-substitution subst-list value)))
-                (immutable-map-data env))))
+  (immutable-map-image (lambda (value) (apply-substitution subst-list value)) env #'make-value-environment))
 
 (defmethod type-variables ((env value-environment))
   (let ((out nil))
-    (fset:do-map (name type (immutable-map-data env))
+    (do-immutable-map (name type env)
       (declare (ignore name))
       (setf out (append (type-variables type) out)))
-    (remove-duplicates out :test #'equalp)))
+    (remove-duplicates out :test #'ty=)))
 
 ;;;
 ;;; Type environments
@@ -265,11 +276,26 @@
     (member :enum :lisp :transparent)
     (cons (eql :native) (cons t null))))
 
+(defun variance-list-p (x)
+  (and (alexandria:proper-list-p x)
+       (every (lambda (variance)
+                (member variance '(:covariant :contravariant :invariant) :test #'eq))
+              x)))
+
+(deftype variance-list ()
+  '(satisfies variance-list-p))
+
 (defstruct type-entry
   (name          (util:required 'name)          :type symbol                    :read-only t)
+  (source-name   nil                            :type (or null string)          :read-only t)
   (runtime-type  (util:required 'runtime-type)  :type t                         :read-only t)
   (type          (util:required 'type)          :type ty                        :read-only t)
   (tyvars        (util:required 'tyvars)        :type tyvar-list                :read-only t)
+  ;; Variance of each type parameter in declaration order.
+  ;; Entries are one of :COVARIANT, :CONTRAVARIANT, or :INVARIANT.
+  ;; Used by relaxed value restriction when deciding whether weak variables
+  ;; from expansive bindings can be generalized.
+  (variances     (util:required 'variances)     :type variance-list             :read-only t)
   (constructors  (util:required 'constructors)  :type util:symbol-list          :read-only t)
   ;; An explicit repr defined in the source, or nil if none was
   ;; supplied. Computed repr will be reflected in ENUM-REPR, NEWTYPE,
@@ -317,14 +343,16 @@
 (defun make-default-type-environment ()
   "Create a TYPE-ENVIRONMENT containing early types."
   (make-type-environment
-   :data (fset:map
+   :data (avl:make-avl-map
           ;; Early Types
           ('coalton:Boolean
            (make-type-entry
             :name 'coalton:Boolean
+            :source-name "Boolean"
             :runtime-type 'cl:boolean
             :type *boolean-type*
             :tyvars nil
+            :variances nil
             :constructors '(coalton:True coalton:False)
             :explicit-repr '(:native cl:boolean)
             :enum-repr t
@@ -334,9 +362,11 @@
           ('coalton:Unit
            (make-type-entry
             :name 'coalton:Unit
-            :runtime-type '(member coalton::Unit/Unit)
+            :source-name "Unit"
+            :runtime-type 'coalton-impl/constants:lisp-type-of-unit
             :type *unit-type*
             :tyvars nil
+            :variances nil
             :constructors '(coalton:Unit)
             :explicit-repr :enum
             :enum-repr t
@@ -346,9 +376,11 @@
           ('coalton:Char
            (make-type-entry
             :name 'coalton:Char
+            :source-name "Char"
             :runtime-type 'cl:character
             :type *char-type*
             :tyvars nil
+            :variances nil
             :constructors nil
             :explicit-repr '(:native cl:character)
             :enum-repr nil
@@ -358,9 +390,11 @@
           ('coalton:Integer
            (make-type-entry
             :name 'coalton:Integer
+            :source-name "Integer"
             :runtime-type 'cl:integer
             :type *integer-type*
             :tyvars nil
+            :variances nil
             :constructors nil
             :explicit-repr '(:native cl:integer)
             :enum-repr nil
@@ -370,9 +404,11 @@
           ('coalton:F32
            (make-type-entry
             :name 'coalton:F32
+            :source-name "F32"
             :runtime-type 'cl:single-float
             :type *single-float-type*
             :tyvars nil
+            :variances nil
             :constructors nil
             :explicit-repr '(:native cl:single-float)
             :enum-repr nil
@@ -382,9 +418,11 @@
           ('coalton:F64
            (make-type-entry
             :name 'coalton:F64
+            :source-name "F64"
             :runtime-type 'cl:double-float
             :type *double-float-type*
             :tyvars nil
+            :variances nil
             :constructors nil
             :explicit-repr '(:native cl:double-float)
             :enum-repr nil
@@ -394,9 +432,11 @@
           ('coalton:String
            (make-type-entry
             :name 'coalton:String
+            :source-name "String"
             :runtime-type 'cl:string
             :type *string-type*
             :tyvars nil
+            :variances nil
             :constructors nil
             :explicit-repr '(:native cl:string)
             :enum-repr nil
@@ -406,9 +446,11 @@
           ('coalton:Fraction
            (make-type-entry
             :name 'coalton:Fraction
+            :source-name "Fraction"
             :runtime-type 'cl:rational
             :type *fraction-type*
             :tyvars nil
+            :variances nil
             :constructors nil
             :explicit-repr '(:native cl:rational)
             :enum-repr nil
@@ -418,9 +460,11 @@
           ('coalton:Arrow
            (make-type-entry
             :name 'coalton:Arrow
+            :source-name "Arrow"
             :runtime-type nil
             :type *arrow-type*
             :tyvars nil
+            :variances '(:contravariant :covariant)
             :constructors nil
             :explicit-repr nil
             :enum-repr nil
@@ -430,9 +474,11 @@
           ('coalton:List
            (make-type-entry
             :name 'coalton:List
+            :source-name "List"
             :runtime-type 'cl:list
             :type *list-type*
             :tyvars (list (make-variable))
+            :variances '(:covariant)
             :constructors '(coalton:Cons coalton:Nil)
             :explicit-repr '(:native cl:list)
             :enum-repr nil
@@ -442,9 +488,11 @@
           ('coalton:Optional
            (make-type-entry
             :name 'coalton:Optional
+            :source-name "Optional"
             :runtime-type 'cl:t
             :type *optional-type*
             :tyvars (list (make-variable))
+            :variances '(:covariant)
             :constructors '(coalton:Some coalton:None)
             :explicit-repr '(:native cl:t)
             :enum-repr nil
@@ -457,6 +505,7 @@
 
 (defstruct constructor-entry
   (name            (util:required 'name)            :type symbol                         :read-only t)
+  (source-name     nil                              :type (or null string)               :read-only t)
   (arity           (util:required 'arity)           :type alexandria:non-negative-fixnum :read-only t)
   (constructs      (util:required 'constructs)      :type symbol                         :read-only t)
   (classname       (util:required 'classname)       :type symbol                         :read-only t)
@@ -487,11 +536,12 @@
 (defun make-default-constructor-environment ()
   "Create a TYPE-ENVIRONMENT containing early constructors"
   (make-constructor-environment
-   :data (fset:map
+   :data (avl:make-avl-map
           ;; Early Constructors
           ('coalton:True
            (make-constructor-entry
             :name 'coalton:True
+            :source-name "True"
             :arity 0
             :constructs 'coalton:Boolean
             :classname 'coalton::Boolean/True
@@ -501,6 +551,7 @@
           ('coalton:False
            (make-constructor-entry
             :name 'coalton:False
+            :source-name "False"
             :arity 0
             :constructs 'coalton:Boolean
             :classname 'coalton::Boolean/False
@@ -508,17 +559,19 @@
             :compressed-repr 'nil))
 
           ('coalton:Unit
-           (make-constructor-entry
+          (make-constructor-entry
             :name 'coalton:Unit
+            :source-name "Unit"
             :arity 0
             :constructs 'coalton:Unit
             :classname 'coalton::Unit/Unit
-            :docstring "`Unit` represents nullary parameters and return types."
-            :compressed-repr 'coalton::Unit/Unit))
+            :docstring "`Unit` is the explicit one-value unit type, distinct from zero-value returns `()`."
+            :compressed-repr coalton-impl/constants:+value-of-unit+))
 
           ('coalton:Cons
            (make-constructor-entry
             :name 'coalton:Cons
+            :source-name "Cons"
             :arity 2
             :constructs 'coalton:List
             :classname nil
@@ -528,6 +581,7 @@
           ('coalton:Nil
            (make-constructor-entry
             :name 'coalton:Nil
+            :source-name "Nil"
             :arity 0
             :constructs 'coalton:List
             :classname nil
@@ -537,6 +591,7 @@
           ('coalton:Some
            (make-constructor-entry
             :name 'coalton:Some
+            :source-name "Some"
             :arity 1
             :constructs 'coalton:Optional
             :classname nil
@@ -546,6 +601,7 @@
           ('coalton:None
            (make-constructor-entry
             :name 'coalton:None
+            :source-name "None"
             :arity 0
             :constructs 'coalton:Optional
             :classname nil
@@ -561,6 +617,7 @@
 
 (defstruct type-alias-entry
   (name      (util:required 'name)      :type symbol           :read-only t)
+  (source-name nil                      :type (or null string) :read-only t)
   (tyvars    (util:required 'tyvars)    :type tyvar-list       :read-only t)
   (type      (util:required 'type)      :type ty               :read-only t)
   (docstring (util:required 'docstring) :type (or null string) :read-only t))
@@ -611,6 +668,7 @@
 
 (defstruct struct-entry
   (name      (util:required 'name)      :type symbol            :read-only t)
+  (source-name nil                      :type (or null string)  :read-only t)
   (fields    (util:required 'fields)    :type struct-field-list :read-only t)
   (docstring (util:required 'docstring) :type (or null string)  :read-only t))
 
@@ -644,6 +702,12 @@
 (defstruct ty-class-method
   (name      (util:required 'name)      :type symbol           :read-only t)
   (type      (util:required 'type)      :type ty-scheme        :read-only t)
+  ;; Class-head binders that should be in scope in instance method bodies
+  ;; before any method-local explicit FORALL binders are introduced.
+  (outer-tvars nil                       :type list             :read-only t)
+  ;; Method-local explicit FORALL binders, kept in source order so instance
+  ;; methods can preserve their scoped names when typechecking nested declares.
+  (explicit-tvars nil                    :type list             :read-only t)
   (docstring (util:required 'docstring) :type (or null string) :read-only t))
 
 (defmethod source:docstring ((self ty-class-method))
@@ -661,6 +725,7 @@
 
 (defstruct ty-class
   (name                (util:required 'name)                :type symbol              :read-only t)
+  (source-name         nil                                  :type (or null string)    :read-only t)
   (predicate           (util:required 'predicate)           :type ty-predicate        :read-only t)
   (superclasses        (util:required 'superclasses)        :type ty-predicate-list   :read-only t)
   (class-variables     (util:required 'class-variables)     :type util:symbol-list    :read-only t)
@@ -699,6 +764,7 @@
            (values ty-class &optional))
   (make-ty-class
    :name (ty-class-name class)
+   :source-name (ty-class-source-name class)
    :predicate (apply-substitution subst-list (ty-class-predicate class))
    :superclasses (apply-substitution subst-list (ty-class-superclasses class))
    :class-variables (ty-class-class-variables class)
@@ -706,6 +772,8 @@
    :unqualified-methods (mapcar (lambda (method)
                                   (make-ty-class-method :name (ty-class-method-name method)
                                                         :type (apply-substitution subst-list (ty-class-method-type method))
+                                                        :outer-tvars (apply-substitution subst-list (ty-class-method-outer-tvars method))
+                                                        :explicit-tvars (apply-substitution subst-list (ty-class-method-explicit-tvars method))
                                                         :docstring (ty-class-method-docstring method)))
                                 (ty-class-unqualified-methods class))
    :codegen-sym (ty-class-codegen-sym class)
@@ -736,12 +804,13 @@
 ;;;
 
 (defstruct ty-class-instance
-  (constraints             (util:required 'constraints)             :type ty-predicate-list :read-only t)
-  (predicate               (util:required 'predicate)               :type ty-predicate      :read-only t)
-  (codegen-sym             (util:required 'codegen-sym)             :type symbol            :read-only t)
-  (method-codegen-syms     (util:required 'method-codegen-syms)     :type util:symbol-list  :read-only t)
-  (method-codegen-inline-p (util:required 'method-codegen-inline-p) :type list              :read-only t)
-  (docstring               (util:required 'docstring)               :type (or null string)  :read-only t))
+  (constraints             (util:required 'constraints)             :type ty-predicate-list      :read-only t)
+  (predicate               (util:required 'predicate)               :type ty-predicate           :read-only t)
+  (codegen-sym             (util:required 'codegen-sym)             :type symbol                 :read-only t)
+  (method-codegen-syms     (util:required 'method-codegen-syms)     :type util:symbol-list       :read-only t)
+  (method-codegen-inline-p (util:required 'method-codegen-inline-p) :type list                   :read-only t)
+  (docstring               (util:required 'docstring)               :type (or null string)       :read-only t)
+  (location                nil                                      :type (or null source:location) :read-only t))
 
 (defun expand-context (context env)
   "Traverse constraint predicates by looking up those entailed by
@@ -781,6 +850,9 @@ of constraint predicates."
 (defmethod source:docstring ((self ty-class-instance))
   (ty-class-instance-docstring self))
 
+(defmethod source:location ((self ty-class-instance))
+  (ty-class-instance-location self))
+
 (defmethod make-load-form ((self ty-class-instance) &optional env)
   (make-load-form-saving-slots self :environment env))
 
@@ -806,7 +878,8 @@ of constraint predicates."
    :codegen-sym (ty-class-instance-codegen-sym instance)
    :method-codegen-syms (ty-class-instance-method-codegen-syms instance)
    :method-codegen-inline-p (ty-class-instance-method-codegen-inline-p instance)
-   :docstring (ty-class-instance-docstring instance)))
+   :docstring (ty-class-instance-docstring instance)
+   :location (ty-class-instance-location instance)))
 
 (defstruct instance-environment
   (instances    (make-immutable-listmap) :type immutable-listmap :read-only t)
@@ -1030,6 +1103,102 @@ of constraint predicates."
 
 (defmethod type-variables ((env environment))
   (type-variables (environment-value-environment env)))
+
+(defun synchronize-type-variable-counter (env)
+  "Advance `*next-variable-id*` past any tyvar IDs stored in ENV.
+
+Compiled environment updates can reload typechecker structures whose tyvar IDs
+were chosen in a previous image. When the fresh-variable counter is reset in a
+new image, those persisted IDs can collide with newly inferred tyvars and cause
+unrelated substitutions to alias each other."
+  (declare (type environment env)
+           (values null &optional))
+  (let ((max-id -1))
+    (labels ((scan (object)
+               (typecase object
+                 (null nil)
+                 (tyvar
+                  (setf max-id (max max-id (tyvar-id object)))
+                  (scan (ty-alias object)))
+                 (tycon
+                  (scan (ty-alias object)))
+                 (tgen
+                  (scan (ty-alias object)))
+                 (tapp
+                  (scan (ty-alias object))
+                  (scan (tapp-from object))
+                  (scan (tapp-to object)))
+                 (keyword-ty-entry
+                  (scan (keyword-ty-entry-type object)))
+                 (function-ty
+                  (scan (ty-alias object))
+                  (scan (function-ty-positional-input-types object))
+                  (scan (function-ty-keyword-input-types object))
+                  (scan (function-ty-output-types object)))
+                 (result-ty
+                  (scan (ty-alias object))
+                  (scan (result-ty-output-types object)))
+                 (qualified-ty
+                  (scan (qualified-ty-predicates object))
+                  (scan (qualified-ty-type object)))
+                 (ty-predicate
+                  (scan (ty-predicate-types object)))
+                 (ty-scheme
+                  (scan (ty-scheme-type object)))
+                 (type-entry
+                  (scan (type-entry-runtime-type object))
+                  (scan (type-entry-type object))
+                  (scan (type-entry-tyvars object)))
+                 (type-alias-entry
+                  (scan (type-alias-entry-type object))
+                  (scan (type-alias-entry-tyvars object)))
+                 (struct-field
+                  (scan (struct-field-type object)))
+                 (struct-entry
+                  (scan (struct-entry-fields object)))
+                 (ty-class-method
+                  (scan (ty-class-method-type object))
+                  (scan (ty-class-method-outer-tvars object))
+                  (scan (ty-class-method-explicit-tvars object)))
+                 (ty-class
+                  (scan (ty-class-predicate object))
+                  (scan (ty-class-superclasses object))
+                  (scan (ty-class-unqualified-methods object))
+                  (scan (ty-class-superclass-dict object)))
+                 (ty-class-instance
+                  (scan (ty-class-instance-constraints object))
+                  (scan (ty-class-instance-predicate object)))
+                 (instance-environment
+                  (scan (instance-environment-instances object)))
+                 (specialization-entry
+                  (scan (specialization-entry-to-ty object)))
+                 (immutable-map
+                  (do-immutable-map (_ value object)
+                    (declare (ignore _))
+                    (scan value)))
+                 (immutable-listmap
+                  (avl:do-avl (_ value (immutable-listmap-data object))
+                    (declare (ignore _))
+                    (scan value)))
+                 (environment
+                  (scan (environment-value-environment object))
+                  (scan (environment-type-environment object))
+                  (scan (environment-constructor-environment object))
+                  (scan (environment-type-alias-environment object))
+                  (scan (environment-struct-environment object))
+                  (scan (environment-class-environment object))
+                  (scan (environment-instance-environment object))
+                  (scan (environment-specialization-environment object)))
+                 (cons
+                  (scan (car object))
+                  (scan (cdr object)))
+                 (list
+                  (dolist (entry object)
+                    (scan entry)))
+                 (t nil))))
+      (scan env)
+      (ensure-next-variable-id-at-least max-id))
+    nil))
 
 ;;;
 ;;; Functions
@@ -1304,14 +1473,39 @@ Signals a coalton-bug error if the type is not found and NO-ERROR is false (the 
 (defun lookup-class-instances (env class &key no-error)
   (declare (type environment env)
            (type symbol class)
-           (values fset:seq &optional))
+           (values list &optional))
   (immutable-listmap-lookup (instance-environment-instances (environment-instance-environment env)) class :no-error no-error))
+
+(defun synthesized-class-instance-constraints (pred)
+  "Return compiler-synthesized constraints for PRED when applicable.
+
+This currently covers structural `RuntimeRepr` instances for function types
+that cannot be expressed as ordinary source instances.
+
+Returns two values:
+1. A list of prerequisite predicates.
+2. A boolean indicating whether a synthesized instance exists."
+  (declare (type ty-predicate pred)
+           (values ty-predicate-list boolean &optional))
+  (let ((types-package (cl:find-package "COALTON/TYPES")))
+    (unless (and types-package
+                 (= 1 (length (ty-predicate-types pred))))
+      (return-from synthesized-class-instance-constraints (values nil nil)))
+    (let* ((runtime-repr (cl:find-symbol "RUNTIMEREPR" types-package))
+           (head-type (first (ty-predicate-types pred)))
+           (location (source:location pred)))
+      (declare (ignore location))
+      (unless (typep head-type 'function-ty)
+        (return-from synthesized-class-instance-constraints (values nil nil)))
+      (if (eq (ty-predicate-class pred) runtime-repr)
+          (values nil t)
+          (values nil nil)))))
 
 (defun lookup-class-instance (env pred &key no-error)
   (declare (type environment env))
   (let* ((pred-class (ty-predicate-class pred))
          (instances (lookup-class-instances env pred-class :no-error no-error)))
-    (fset:do-seq (instance instances)
+    (dolist (instance instances)
       (handler-case
           (let ((subs (predicate-match (ty-class-instance-predicate instance) pred)))
             (return-from lookup-class-instance (values instance subs)))
@@ -1368,7 +1562,9 @@ Signals a coalton-bug error if the type is not found and NO-ERROR is false (the 
   (unless (lookup-class env class)
     (error "Class ~S does not exist." class))
 
-  (fset:do-seq (inst (lookup-class-instances env class :no-error t) :index index)
+  (loop :for inst :in (lookup-class-instances env class :no-error t)
+        :for index :from 0
+        :do
     (when (handler-case (or (predicate-mgu (ty-class-instance-predicate value)
                                            (ty-class-instance-predicate inst))
                             t)
@@ -1469,12 +1665,14 @@ Signals a coalton-bug error if the type is not found and NO-ERROR is false (the 
          (to-scheme (quantify (type-variables to-ty)
                               (qualify nil to-ty))))
 
-    (fset:do-seq (elem (immutable-listmap-lookup (environment-specialization-environment env) from :no-error t) :index index)
+    (loop :for elem :in (immutable-listmap-lookup (environment-specialization-environment env) from :no-error t)
+          :for index :from 0
+          :do
       (let* ((type (specialization-entry-to-ty elem))
              (scheme (quantify (type-variables type)
                                (qualify nil type))))
 
-        (when (equalp to-scheme scheme)
+        (when (ty-scheme= to-scheme scheme)
           (return-from add-specialization
             (update-environment env
                                 :specialization-environment
@@ -1507,7 +1705,7 @@ Signals a coalton-bug error if the type is not found and NO-ERROR is false (the 
            (type symbol from)
            (type symbol to)
            (values (or null specialization-entry) &optional))
-  (fset:do-seq (elem (immutable-listmap-lookup (environment-specialization-environment env) from :no-error no-error))
+  (dolist (elem (immutable-listmap-lookup (environment-specialization-environment env) from :no-error no-error))
     (when (eq to (specialization-entry-to elem))
       (return-from lookup-specialization elem)))
 
@@ -1519,7 +1717,7 @@ Signals a coalton-bug error if the type is not found and NO-ERROR is false (the 
            (type symbol from)
            (type ty ty)
            (values (or null specialization-entry) &optional))
-  (fset:do-seq (elem (immutable-listmap-lookup (environment-specialization-environment env) from :no-error no-error))
+  (dolist (elem (immutable-listmap-lookup (environment-specialization-environment env) from :no-error no-error))
     (handler-case
         (progn
           (match (specialization-entry-to-ty elem) ty)
@@ -1680,7 +1878,7 @@ This function will return the single functional dependency
                           pred-tys)
           :do (block update-block
                 ;; Try to find a matching relation for the current fundep
-                (fset:do-seq (s state)
+                (dolist (s state)
                   ;; If the left side matches checking either direction
                   (when (or (handler-case
                                 (progn
@@ -1747,7 +1945,7 @@ This function will return the single functional dependency
 
          (new-pred (make-ty-predicate :class class-name :types vars :location (source:location pred))))
 
-    (fset:do-seq (inst (lookup-class-instances env class-name))
+    (dolist (inst (lookup-class-instances env class-name))
       (handler-case
           (progn
             (predicate-mgu new-pred (ty-class-instance-predicate inst))
@@ -1767,6 +1965,145 @@ This function will return the single functional dependency
     ;; If there was a fundep conflict, one of the instances should have matched
     (util:unreachable)))
 
+;;; Instance-head improvement. A unique non-linear instance head, such
+;;; as `Applicative (Box :r :r)`, can force equalities in a wanted
+;;; predicate without implying that a lone concrete instance should
+;;; become a default.
+
+(defun type-variable-occurrences (type)
+  (declare (type (or ty ty-predicate keyword-ty-entry list) type)
+           (values tyvar-list &optional))
+  (typecase type
+    (ty-predicate
+     (type-variable-occurrences (ty-predicate-types type)))
+    (tyvar
+     (list type))
+    (tapp
+     (append (type-variable-occurrences (tapp-from type))
+             (type-variable-occurrences (tapp-to type))))
+    (keyword-ty-entry
+     (type-variable-occurrences (keyword-ty-entry-type type)))
+    (function-ty
+     (append
+      (type-variable-occurrences (function-ty-positional-input-types type))
+      (type-variable-occurrences (function-ty-keyword-input-types type))
+      (type-variable-occurrences (function-ty-output-types type))))
+    (result-ty
+     (type-variable-occurrences (result-ty-output-types type)))
+    (list
+     (mapcan #'type-variable-occurrences type))
+    (ty
+     nil)))
+
+(defun repeated-type-variables (type)
+  (declare (type (or ty ty-predicate list) type)
+           (values tyvar-list &optional))
+  (let ((counts nil))
+    (dolist (var (type-variable-occurrences type))
+      (let ((entry (assoc var counts :test #'ty=)))
+        (if entry
+            (incf (cdr entry))
+            (push (cons var 1) counts))))
+    (loop :for (var . count) :in counts
+          :when (> count 1)
+            :collect var)))
+
+(defun linearize-type (type)
+  "Replace each type variable occurrence in TYPE with a distinct fresh variable."
+  (declare (type (or ty keyword-ty-entry list) type))
+  (typecase type
+    (tyvar
+     (make-variable :kind (kind-of type)
+                    :allow-result-p (tyvar-allow-result-p type)
+                    :source-name (tyvar-source-name type)))
+    (tapp
+     (make-tapp
+      :alias (mapcar #'linearize-type (ty-alias type))
+      :from (linearize-type (tapp-from type))
+      :to (linearize-type (tapp-to type))))
+    (keyword-ty-entry
+     (make-keyword-ty-entry
+      :keyword (keyword-ty-entry-keyword type)
+      :type (linearize-type (keyword-ty-entry-type type))))
+    (function-ty
+     (make-function-ty
+      :alias (mapcar #'linearize-type (ty-alias type))
+      :positional-input-types (linearize-type (function-ty-positional-input-types type))
+      :keyword-input-types (linearize-type (function-ty-keyword-input-types type))
+      :keyword-open-p (function-ty-keyword-open-p type)
+      :output-types (linearize-type (function-ty-output-types type))))
+    (result-ty
+     (make-result-ty
+      :alias (mapcar #'linearize-type (ty-alias type))
+      :output-types (linearize-type (result-ty-output-types type))))
+    (list
+     (mapcar #'linearize-type type))
+    (ty
+     type)))
+
+(defun linearize-pred (pred)
+  (declare (type ty-predicate pred)
+           (values ty-predicate &optional))
+  (make-ty-predicate
+   :class (ty-predicate-class pred)
+   :types (linearize-type (ty-predicate-types pred))
+   :location (source:location pred)))
+
+(defun single-unifying-instance (env pred)
+  (declare (type environment env)
+           (type ty-predicate pred)
+           (values (or null ty-class-instance) boolean &optional))
+  (let ((match nil))
+    (dolist (instance (lookup-class-instances env (ty-predicate-class pred) :no-error t))
+      (handler-case
+          (progn
+            (predicate-mgu (fresh-pred (ty-class-instance-predicate instance)) pred)
+            (when match
+              (return-from single-unifying-instance (values nil nil)))
+            (setf match instance))
+        (predicate-unification-error () nil)))
+    (values match (and match t))))
+
+(defun improve-predicate-from-instance-head (env pred subs)
+  (declare (type environment env)
+           (type ty-predicate pred)
+           (type substitution-list subs)
+           (values substitution-list boolean &optional))
+  (multiple-value-bind (instance foundp)
+      (single-unifying-instance env pred)
+    (unless foundp
+      (return-from improve-predicate-from-instance-head (values subs nil)))
+    (let* ((instance-pred (fresh-pred (ty-class-instance-predicate instance)))
+           (instance-vars (type-variables instance-pred))
+           (wanted-pred (apply-substitution subs pred))
+           (wanted-vars (type-variables wanted-pred)))
+      (unless (repeated-type-variables instance-pred)
+        (return-from improve-predicate-from-instance-head (values subs nil)))
+      (handler-case
+          (let ((full-subs (predicate-mgu instance-pred wanted-pred))
+                (linear-subs (predicate-mgu (linearize-pred instance-pred) wanted-pred)))
+            ;; Only keep wanted substitutions that come from repeated
+            ;; instance variables. Substitutions also produced by the
+            ;; linearized head are ordinary instance matching, not
+            ;; instance-head improvement.
+            (loop :with new-subs := subs
+                  :with improvedp := nil
+                  :for var :in wanted-vars
+                  :for full-type := (apply-substitution full-subs var)
+                  :for linear-type := (apply-substitution linear-subs var)
+                  :when (and (not (ty= var full-type))
+                             (not (ty= full-type linear-type))
+                             (not (intersection (type-variables full-type)
+                                                instance-vars
+                                                :test #'ty=)))
+                    :do (let ((previous-subs new-subs))
+                          (setf new-subs (unify new-subs var full-type))
+                          (unless (equalp previous-subs new-subs)
+                            (setf improvedp t)))
+                  :finally (return (values new-subs improvedp))))
+        (coalton-internal-type-error ()
+          (values subs nil))))))
+
 (defun solve-fundeps (env preds subs)
   "First, this function creates and applies substitutions to preds based
 on functional dependencies that constrain them with respect to one
@@ -1784,24 +2121,33 @@ predicates with all substitutions applied and the new substitutions."
   (let ((fundepsp-cache (make-hash-table :test #'eq)))
     (labels ((fundepsp (preds)
                "Are any of PREDS constrained by functional dependencies?"
-               (when (endp preds)
-                 (return-from fundepsp nil))
-               (let* ((pred (first preds))
-                      (class-name (ty-predicate-class pred)))
-                 (multiple-value-bind (fundepsp foundp)
-                     (gethash class-name fundepsp-cache)
-                   (cond
-                     (foundp
-                      (or fundepsp (fundepsp (rest preds))))
-                     (t
-                      (let ((class (lookup-class env class-name)))
-                        (or (setf (gethash class-name fundepsp-cache)
-                                  (or (consp (ty-class-fundeps class))
-                                      (fundepsp (ty-class-superclasses class))))
-                            (fundepsp (rest preds))))))))))
+               (unless (endp preds)
+                 (let* ((pred (first preds))
+                        (class-name (ty-predicate-class pred)))
+                   (multiple-value-bind (fundepsp foundp)
+                       (gethash class-name fundepsp-cache)
+                     (cond
+                       (foundp
+                        (or fundepsp (fundepsp (rest preds))))
+                       (t
+                        (let ((class (lookup-class env class-name)))
+                          (or (setf (gethash class-name fundepsp-cache)
+                                    (or (consp (ty-class-fundeps class))
+                                        (fundepsp (ty-class-superclasses class))))
+                              (fundepsp (rest preds))))))))))
+             (instance-improvementp (preds)
+               "Can any predicate be improved from a non-linear instance head?"
+               (loop :for pred :in preds
+                     :thereis (nth-value
+                                1
+                                (improve-predicate-from-instance-head
+                                 env
+                                 (apply-substitution subs pred)
+                                 subs)))))
 
-      ;; If no predicates have fundeps, then exit early
-      (unless (fundepsp preds)
+      ;; If no predicates have fundeps or instance-head improvements,
+      ;; then exit early.
+      (unless (or (fundepsp preds) (instance-improvementp preds))
         (return-from solve-fundeps (values preds subs)))))
 
   ;; Expand PREDS into the superclasses
@@ -1865,7 +2211,8 @@ predicates with all substitutions applied and the new substitutions."
         :finally (setf preds (apply-substitution subs preds)))
 
   ;; This block is meant to simplify PREDS if instances exist in the
-  ;; environment which constrain them by functional dependencies.
+  ;; environment which constrain them by functional dependencies or by
+  ;; repeated variables in an instance head.
   (loop :with new-subs := nil
         :with preds-generated := nil
         :for i :below +fundep-max-depth+
@@ -1906,6 +2253,15 @@ predicates with all substitutions applied and the new substitutions."
                          (setf preds-generated t)
                          (return))
 
+                 :do (multiple-value-bind (improved-subs improvedp)
+                         (improve-predicate-from-instance-head
+                          env
+                          (apply-substitution new-subs pred)
+                          new-subs)
+                       (when improvedp
+                         (setf new-subs improved-subs)
+                         (return)))
+
                  :when (ty-class-fundeps class)
                    :do (setf new-subs (generate-fundep-subs% env (apply-substitution new-subs pred) new-subs)))
            (if (and (not preds-generated)
@@ -1942,7 +2298,7 @@ predicates with all substitutions applied and the new substitutions."
 
 (defun generate-fundep-subs-for-pred% (pred state class-variables fundep subs)
   (declare (type ty-predicate pred)
-           (type fset:seq state)
+           (type list state)
            (type util:symbol-list class-variables)
            (type fundep fundep)
            (type substitution-list subs)
@@ -1957,7 +2313,7 @@ predicates with all substitutions applied and the new substitutions."
                     class-variables
                     (ty-predicate-types pred))))
 
-    (fset:do-seq (entry state)
+    (dolist (entry state)
       (handler-case
           (let* ((fresh-entry (fresh-fundep-entry entry))
                  (left-subs (match-list from-tys (fundep-entry-from fresh-entry)))

@@ -5,7 +5,8 @@
    #:coalton-impl/codegen/ast)
   (:import-from
    #:coalton-impl/algorithm
-   #:immutable-map-data)
+   #:immutable-map-data
+   #:do-immutable-map)
   (:import-from
    #:coalton-impl/codegen/typecheck-node
    #:typecheck-node)
@@ -46,9 +47,6 @@
    #:coalton-impl/codegen/constant-propagation
    #:propagate-constants)
   (:import-from
-   #:coalton-impl/codegen/canonicalizer
-   #:canonicalize)
-  (:import-from
    #:coalton-impl/codegen/inliner
    #:inline-applications)
   (:import-from
@@ -72,7 +70,8 @@
            (values tc:environment &optional))
   (multiple-value-bind (toplevel-functions toplevel-values)
       (loop :for (name . node) :in bindings
-            :if (node-abstraction-p node)
+            :if (and (node-abstraction-p node)
+                     (not (util:dynamic-variable-name-p name)))
               :collect (cons name (length (node-abstraction-vars node))) :into functions
             :else
               :collect name :into variables
@@ -99,9 +98,18 @@ mapping known function names to their arity."
            (values hash-table &optional))
   (let ((table (make-hash-table))
         (fun-env (tc:environment-function-environment env)))
-    (fset:do-map (name entry (immutable-map-data fun-env))
+    (do-immutable-map (name entry fun-env)
       (setf (gethash name table) (tc:function-env-entry-arity entry)))
     table))
+
+(defun update-binding-env (bindings inline-p-table env)
+  (declare (type binding-list bindings)
+           (type hash-table inline-p-table)
+           (type tc:environment env)
+           (values tc:environment &optional))
+  (loop :for (name . node) :in bindings
+        :do (setf env (tc:set-code env name node)))
+  (update-function-env bindings inline-p-table env))
 
 (defun optimize-bindings (bindings monomorphize-table inline-p-table package env)
   (declare (type binding-list bindings)
@@ -111,12 +119,19 @@ mapping known function names to their arity."
            (type tc:environment env)
            (values binding-list tc:environment))
 
-
-  (let ((bindings (optimize-bindings-initial bindings package env)))
-
-    ;; Make code and environment data available to the monomorphizer
-    (loop :for (name . node) :in bindings
-          :do (setf env (tc:set-code env name node)))
+  (let ((bindings
+          ;; Optimize each dependency SCC once, publishing completed SCCs into
+          ;; the environment before optimizing later SCCs. This enables
+          ;; same-translation-unit inlining and specialization without exposing
+          ;; mutually recursive groups to each other during optimization.
+          (loop :with initial-bindings := bindings
+                :for scc :in (node-binding-sccs initial-bindings)
+                :for scc-bindings := (loop :for binding :in initial-bindings
+                                          :when (member (car binding) scc)
+                                            :collect binding)
+                :for optimized-scc := (optimize-bindings-initial scc-bindings package env)
+                :do (setf env (update-binding-env optimized-scc inline-p-table env))
+                :append optimized-scc)))
 
     (let* ((manager (make-candidate-manager))
 
@@ -152,7 +167,7 @@ mapping known function names to their arity."
 
 
       ;; Update function env
-      (setf env (update-function-env bindings inline-p-table env))
+      (setf env (update-binding-env bindings inline-p-table env))
 
 
       (let ((function-table (make-function-table env)))
@@ -193,7 +208,8 @@ arity. TABLE will be mutated with additional entries."
                       :properties (node-properties node)
                       :rator-type (node-type (node-application-rator node))
                       :rator name
-                      :rands (node-application-rands node)))))))
+                      :rands (node-application-rands node)
+                      :keyword-rands (node-application-keyword-rands node)))))))
 
            (add-local-funs (node)
              (loop :for (name . node) :in (node-let-bindings node)
@@ -245,7 +261,6 @@ ENV. Return a new node which is optimized."
                 (> runs 1))
        (format t "~&;; Optimizing again, attempt #~D~%" runs))
      (setf node (transform-intrinsic-applications node))
-     (setf node (canonicalize node))
      (setf node (match-dynamic-extent-lift node env))
      (setf node (propagate-constants node env))
      (setf node (apply-specializations node env))
@@ -326,6 +341,13 @@ speaking, the following kinds of transformations happen:
       (t
        (return-from pointfree node)))
 
+    ;; If there are no positional parameters left to synthesize, NODE is
+    ;; already a first-class function value. Wrapping it in a nullary thunk is
+    ;; redundant and breaks keyword-bearing nullary functions by forcing an
+    ;; extra application step.
+    (when (zerop num-params)
+      (return-from pointfree node))
+
     (let* ((orig-param-names (tc:lookup-function-source-parameter-names env (node-variable-value function)))
 
            (param-names (loop :for i :from 0 :below num-params
@@ -353,9 +375,9 @@ speaking, the following kinds of transformations happen:
        :type (node-type node)
        :vars param-names
        :subexpr (make-node-application
-                 :type (tc:make-function-type*
-                        (subseq (tc:function-type-arguments (node-type function)) (length new-args))
-                        (tc:function-return-type (node-type node)))
+                 :type (tc:function-remove-arguments
+                        (node-type function)
+                        (length new-args))
                  :properties '()
                  :rator function
                  :rands new-args)))))

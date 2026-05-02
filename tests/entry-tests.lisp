@@ -1,13 +1,18 @@
 (in-package #:coalton-tests)
 
+(uiop:define-package #:coalton-tests/entry-name-preservation
+  (:use #:coalton #:coalton-prelude)
+  (:export #:identity))
+
 (defun compile-test-file ()
   (test-file "examples/small-coalton-programs/src/fact-fib.coal"))
 
 (defun source-forms (string)
-  (with-input-from-string (stream string)
-    (loop :for form := (read stream nil nil)
-          :while form
-          :collect form)))
+  (let ((*readtable* (copy-readtable nil)))
+    (with-input-from-string (stream string)
+      (loop :for form := (read stream nil nil)
+            :while form
+            :collect form))))
 
 (deftest test-compile-to-lisp ()
   "Test that the Coalton compiler compiles a test file into something that looks like Lisp source."
@@ -28,7 +33,8 @@
       (fmakunbound fact)
       (setf entry:*global-environment* (tc:unset-function entry:*global-environment* fact)))
     (let ((file (source:make-source-file (compile-test-file) :name "test")))
-      (entry:compile file :load t)
+      (let ((*readtable* (copy-readtable nil)))
+        (entry:compile file :load t))
       (let ((fact (test-sym)))
         (is (fboundp fact)
             "Test function was bound as side effect of loading fasl")
@@ -37,3 +43,13 @@
         (is (equalp (tc:make-function-env-entry :name fact :arity 1 :inline-p nil)
                     (tc:lookup-function entry:*global-environment* fact :no-error t))
             "Environment was restored")))))
+
+(deftest test-compile-to-fasl-with-polymorphic-declare ()
+  "Test that preserved type variable names do not break declared-vs-inferred scheme comparison during compile-file."
+  (with-coalton-compilation (:package #:coalton-tests/entry-name-preservation)
+    (coalton-toplevel
+      (declare identity (:a -> :a))
+      (define (identity x)
+        x)))
+  (is (fboundp 'coalton-tests/entry-name-preservation:identity)
+      "Polymorphic identity was bound as side effect of loading fasl"))

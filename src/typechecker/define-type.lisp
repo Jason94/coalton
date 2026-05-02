@@ -86,6 +86,100 @@
 (deftype type-definition-list ()
   '(satisfies type-definition-list-p))
 
+(defun %ensure-arity-variances (variances arity)
+  (declare (type tc:variance-list variances)
+           (type alexandria:non-negative-fixnum arity)
+           (values tc:variance-list &optional))
+  (if (>= (length variances) arity)
+      (subseq variances 0 arity)
+      (append variances
+              (make-list (- arity (length variances))
+                         :initial-element ':invariant))))
+
+(defun type-definition-opaque-p (type)
+  "Return T when TYPE has no inspectable body for variance inference.
+
+Opaque types are definitions without constructors or aliases, e.g.
+`(repr :native ...) (define-type (T :a))`.
+
+Without constructor fields (or an alias body), we cannot infer whether type
+parameters are produced, consumed, or both. The inference pass therefore treats
+opaque parameters as invariant by default."
+  (declare (type type-definition type)
+           (values boolean &optional))
+  (and (null (type-definition-aliased-type type))
+       (null (type-definition-constructors type))))
+
+(defun infer-type-definition-scc-variances (types type-tyvar-table env)
+  "Infer variances for type parameters of TYPES in one SCC.
+
+TYPE-TYVAR-TABLE maps type names to the post-kind-inference tyvars for that
+type, in declaration order.
+
+This computes a fixed point over the SCC because mutually recursive type
+definitions depend on each other's parameter variances.
+
+For opaque type constructors, inference defaults to invariant parameters.
+This is conservative and intentionally aligns with mutable native wrappers."
+  (declare (type type-definition-list types)
+           (type hash-table type-tyvar-table)
+           (type tc:environment env)
+           (values hash-table &optional))
+  (let ((variance-table (make-hash-table :test #'eq))
+        (env-resolver (tc:make-env-variance-resolver env)))
+    ;; Initialize each type parameter as covariant, except opaque types, which
+    ;; are conservatively invariant.
+    ;;
+    ;; Current stdlib audit (2026-02) for parametric opaque types:
+    ;;   Cell, Vector, Queue, Slice, Hashtable, LispArray, FileStream
+    ;; All are currently modeled invariantly and each exposes mutation and/or
+    ;; mixed read-write capabilities.
+    (loop :for type :in types
+          :for name := (type-definition-name type)
+          :for tyvars := (gethash name type-tyvar-table)
+          :for initial := (make-list (length tyvars)
+                                     :initial-element (if (type-definition-opaque-p type)
+                                                          ':invariant
+                                                          ':covariant))
+          :do (setf (gethash name variance-table) initial))
+
+    (let ((changed t))
+      (loop :while changed :do
+        (setf changed nil)
+        (loop :for type :in types
+              :for name := (type-definition-name type)
+              :for tyvars := (gethash name type-tyvar-table)
+              :for current-variances := (gethash name variance-table)
+              :unless (type-definition-opaque-p type)
+                :do (let ((observed-variances (make-hash-table :test #'eql)))
+                      (labels ((resolver (tycon-name arity)
+                                 (declare (type symbol tycon-name)
+                                          (type alexandria:non-negative-fixnum arity)
+                                          (values tc:variance-list &optional))
+                                 (multiple-value-bind (local-variances foundp)
+                                     (gethash tycon-name variance-table)
+                                   (if foundp
+                                       (%ensure-arity-variances local-variances arity)
+                                       (funcall env-resolver tycon-name arity))))
+                               (observe (ty)
+                                 (declare (type tc:ty ty))
+                                 (tc:collect-tyvar-variances ty #'resolver :table observed-variances)))
+                        (if (type-definition-aliased-type type)
+                            (observe (type-definition-aliased-type type))
+                            (loop :for ctor-args :in (type-definition-constructor-args type)
+                                  :do (loop :for field-ty :in ctor-args
+                                            :do (observe field-ty))))
+
+                        (let ((next-variances
+                                (loop :for tyvar :in tyvars
+                                      :for current :in current-variances
+                                      :for observed := (tc:tyvar-variance observed-variances tyvar)
+                                      :collect (tc:variance-join current observed))))
+                          (unless (equal next-variances current-variances)
+                            (setf changed t)
+                            (setf (gethash name variance-table) next-variances)))))))
+      variance-table)))
+
 (defun toplevel-define-type (types structs type-aliases env)
   (declare (type parser:toplevel-define-type-list types)
            (type parser:toplevel-define-struct-list structs)
@@ -148,6 +242,20 @@
                     :do (tc:tc-error "Unused type variable in define-type-alias"
                                      (tc:tc-note defined-var "unused variable defined here"))))
 
+  ;; Ensure that every type variable used in a type alias is declared
+  ;; by the alias head. This runs after the unused-variable check so
+  ;; existing diagnostics keep the same precedence when both apply.
+  (loop :for type :in type-aliases
+        :for defined-vars := (mapcar #'parser:keyword-src-name
+                                     (parser:type-definition-vars type))
+        :do (loop :for used-var :in (parser:collect-type-variables
+                                     (parser:type-definition-aliased-type type))
+                  :unless (member (parser:tyvar-name used-var) defined-vars :test #'eq)
+                    :do (tc:tc-error "Unknown type variable"
+                                     (tc:tc-note used-var
+                                                 "Unknown type variable ~S"
+                                                 (parser:tyvar-name used-var)))))
+
   (let* ((type-names (mapcar (alexandria:compose #'parser:identifier-src-name
                                                  #'parser:type-definition-name)
                              (append types structs type-aliases)))
@@ -182,14 +290,19 @@
            ;; Register each type in the partial type env
            :do (loop :for type :in scc
                      :for name := (parser:identifier-src-name (parser:type-definition-name type))
-                     :for vars := (mapcar #'parser:keyword-src-name (parser:type-definition-vars type))
+                     :for vars := (parser:type-definition-vars type)
 
                      ;; Register each type's type variables in the environment. A
                      ;; mapping is stored from (type-name, var-name) to kind-variable
                      ;; because type variable names are not unique between define-types.
                      :for kvars
                        := (loop :for var :in vars
-                                :collect (tc:kind-of (partial-type-env-add-var partial-env var)))
+                                :collect (tc:kind-of
+                                          (partial-type-env-add-var
+                                           partial-env
+                                           (parser:keyword-src-name var)
+                                           (or (parser:keyword-src-source-name var)
+                                               (parser:keyword-src-name var)))))
 
                      :for kind := (if (typep type 'parser:toplevel-define-type-alias)
                                       ;; Type aliases may not alias a type of kind *.
@@ -203,24 +316,36 @@
            :append  (multiple-value-bind (type-definitions instances_ ksubs)
                         (infer-define-type-scc-kinds scc partial-env)
                       (setf instances (append instances instances_))
-                      (loop :for type :in type-definitions
-
-                            :for parser-type := (gethash (type-definition-name type) type-table)
-
-                            :for vars := (tc:apply-ksubstitution
-                                          ksubs
-                                          (loop :for var :in (parser:type-definition-vars parser-type)
-                                                :for var-name := (parser:keyword-src-name var)
-                                                :collect (gethash var-name (partial-type-env-ty-table partial-env))))
-
-                            :do (setf env (update-env-for-type-definition type vars parser-type env))
-                            :finally (return type-definitions))))
+                      (let* ((type-tyvar-table
+                               (loop :with table := (make-hash-table :test #'eq)
+                                     :for type :in type-definitions
+                                     :for parser-type := (gethash (type-definition-name type) type-table)
+                                     :for vars := (tc:apply-ksubstitution
+                                                   ksubs
+                                                   (loop :for var :in (parser:type-definition-vars parser-type)
+                                                         :for var-name := (parser:keyword-src-name var)
+                                                         :collect (gethash var-name (partial-type-env-ty-table partial-env))))
+                                     :do (setf (gethash (type-definition-name type) table) vars)
+                                     :finally (return table)))
+                             (type-variance-table
+                               (infer-type-definition-scc-variances
+                                type-definitions
+                                type-tyvar-table
+                                env)))
+                        (loop :for type :in type-definitions
+                              :for name := (type-definition-name type)
+                              :for parser-type := (gethash name type-table)
+                              :for vars := (gethash name type-tyvar-table)
+                              :for variances := (gethash name type-variance-table)
+                              :do (setf env (update-env-for-type-definition type vars variances parser-type env))
+                              :finally (return type-definitions)))))
      instances
      env)))
 
-(defun update-env-for-type-definition (type tyvars parsed-type env)
+(defun update-env-for-type-definition (type tyvars variances parsed-type env)
   (declare (type type-definition type)
            (type tc:tyvar-list tyvars)
+           (type tc:variance-list variances)
            (type parser:type-definition parsed-type)
            (type tc:environment env)
            (values tc:environment))
@@ -248,6 +373,7 @@
                       (type-definition-name type)
                       (tc:make-type-alias-entry
                        :name (type-definition-name type)
+                       :source-name (parser:identifier-src-source-name (parser:type-definition-name parsed-type))
                        :tyvars tyvars
                        :type aliased-type
                        :docstring nil)))))
@@ -269,6 +395,7 @@
                       (type-definition-name type)
                       (tc:make-struct-entry
                        :name (type-definition-name type)
+                       :source-name (parser:identifier-src-source-name (parser:type-definition-name parsed-type))
                        :fields fields
                        :docstring nil)))))
         ((tc:lookup-struct env (type-definition-name type) :no-error t)
@@ -281,9 +408,11 @@
          (type-definition-name type)
          (tc:make-type-entry
           :name (type-definition-name type)
+          :source-name (parser:identifier-src-source-name (parser:type-definition-name parsed-type))
           :runtime-type (type-definition-runtime-type type)
           :type (type-definition-type type)
           :tyvars tyvars
+          :variances variances
           :constructors (mapcar #'tc:constructor-entry-name (type-definition-constructors type))
           :explicit-repr (type-definition-explicit-repr type)
           :enum-repr (type-definition-enum-repr type)
@@ -403,8 +532,51 @@
                                                        :name name
                                                        :kind (tc:apply-ksubstitution ksubs kind))))
 
-    ;; Build type-definitions for each type in the scc
-    (let ((instances nil))
+    ;; Reparse constructor field types after SCC aliases are installed so
+    ;; constructor signatures see the same expanded aliases as ordinary
+    ;; expression type parsing.
+    (let* ((alias-env
+             (loop :with alias-env := (partial-type-env-env env)
+                   :for type :in types
+                   :for name := (parser:identifier-src-name (parser:type-definition-name type))
+                   :for parser-aliased-type := (parser:type-definition-aliased-type type)
+                   :when parser-aliased-type
+                     :do (let* ((tvars
+                                  (tc:apply-ksubstitution
+                                   ksubs
+                                   (mapcar (lambda (var)
+                                             (partial-type-env-lookup-var
+                                              env
+                                              (parser:keyword-src-name var)
+                                              var))
+                                           (parser:type-definition-vars type))))
+                                (alias
+                                  (tc:apply-type-argument-list
+                                   (tc:apply-ksubstitution
+                                    ksubs
+                                    (gethash name (partial-type-env-ty-table env)))
+                                   tvars))
+                                (aliased-type
+                                  (tc:push-type-alias
+                                   (tc:apply-ksubstitution ksubs (gethash name alias-table))
+                                   alias)))
+                           (setf alias-env
+                                 (tc:set-type-alias
+                                  alias-env
+                                  name
+                                  (tc:make-type-alias-entry
+                                   :name name
+                                   :source-name (parser:identifier-src-source-name
+                                                 (parser:type-definition-name type))
+                                   :tyvars tvars
+                                   :type aliased-type
+                                   :docstring nil))))
+                   :finally (return alias-env)))
+           (alias-partial-env
+             (make-partial-type-env
+              :env alias-env
+              :ty-table (partial-type-env-ty-table env)))
+           (instances nil))
       (values
        (loop
          :for type :in types
@@ -426,7 +598,17 @@
            := (and repr (eq repr-type :native) (cst:raw (parser:attribute-repr-arg repr)))
 
 
-         ;; Apply ksubs to find the type of each constructor
+         :for constructor-args
+           := (loop
+                :for ctor :in (parser:type-definition-ctors type)
+                :collect
+                (loop :for parser-field-type
+                        :in (parser:type-definition-ctor-field-types ctor)
+                      :collect (multiple-value-bind (field-type ignored-ksubs)
+                                   (parse-type parser-field-type alias-partial-env ksubs)
+                                 (declare (ignore ignored-ksubs))
+                                 field-type)))
+
          :for constructor-types
            := (loop
                 :for ctor
@@ -495,6 +677,7 @@
                     := (source:docstring ctor)
                   :collect (tc:make-constructor-entry
                             :name ctor-name
+                            :source-name (parser:identifier-src-source-name (parser:type-definition-ctor-name ctor))
                             :arity (length (gethash ctor-name ctor-table))
                             :constructs name
                             :classname classname
@@ -534,31 +717,87 @@
                  :docstring (source:docstring type)
                  :location (source:location type)
                  :exception-p (parser:type-definition-exception-p type)
-                 :resumption-p (parser:type-definition-resumption-p type)))
+                 :resumption-p (parser:type-definition-resumption-p type))))
 
-              (runtime-repr-instance (maybe-runtime-repr-instance type-definition)))
-           
-
-           (when runtime-repr-instance
-             (push runtime-repr-instance instances))
-           
+           (setf instances
+                 ;; Some generated instances depend only on the raw type
+                 ;; definition and can be queued before the type has been
+                 ;; installed in the full environment.
+                 (append (maybe-pre-install-generated-instances type-definition env)
+                         instances))
            type-definition))
 
        instances
        ksubs))))
 
+(defun maybe-pre-install-generated-instances (type env)
+  (declare (type type-definition type)
+           (type partial-type-env env)
+           (values parser:toplevel-define-instance-list))
+  (declare (ignore env))
+  (maybe-runtime-repr-instance type))
+
 (defun maybe-runtime-repr-instance (type)
   (declare (type type-definition type))
-  (unless (or (equalp *package* (find-package "COALTON-LIBRARY/TYPES"))
+  (unless (or (equalp *package* (find-package "COALTON/TYPES"))
               ;; LispArray and Complex instance of RuntimeRepr are
               ;; defined in the standard library as specialized
               ;; native types.
-              (and (equalp *package* (find-package "COALTON-LIBRARY/LISPARRAY"))
+              (and (equalp *package* (find-package "COALTON/LISPARRAY"))
                    (eq (type-definition-name type) (find-symbol "LISPARRAY" *package*)))
-              (and (equalp *package* (find-package "COALTON-LIBRARY/MATH/COMPLEX"))
+              (and (equalp *package* (find-package "COALTON/MATH/COMPLEX"))
                    (eq (type-definition-name type) (find-symbol "COMPLEX" *package*)))
               (type-definition-aliased-type type))
-    (make-runtime-repr-instance type)))
+    (list (make-runtime-repr-instance type))))
+
+(defun generated-instance-type-variables (type)
+  (declare (type type-definition type)
+           (values parser:tyvar-list))
+  (loop :for i :below (tc:kind-arity (tc:tycon-kind (type-definition-type type)))
+        :for tvar-name := (alexandria:format-symbol util:+keyword-package+ "~d" i)
+        :collect (parser:make-tyvar
+                  :location (source:location type)
+                  :name tvar-name
+                  :source-name tvar-name)))
+
+(defun generated-instance-applied-type (type tvars &optional (arity (length tvars)))
+  (declare (type type-definition type)
+           (type parser:tyvar-list tvars)
+           (type alexandria:non-negative-fixnum arity)
+           (values parser:ty))
+  (let ((ty (parser:make-tycon
+             :location (source:location type)
+             :name (type-definition-name type))))
+    (loop :for tvar :in tvars
+          :repeat arity
+          :do (setf ty
+                    (parser:make-tapp
+                     :location (source:location type)
+                     :from ty
+                     :to tvar)))
+    ty))
+
+(defun generated-instance-definition (type class methods &key context ty)
+  (declare (type type-definition type)
+           (type symbol class)
+           (type parser:instance-method-definition-list methods)
+           (type parser:ty-predicate-list context)
+           (type parser:ty ty)
+           (values parser:toplevel-define-instance))
+  (let ((location (source:location type)))
+    (parser:make-toplevel-define-instance
+     :context context
+     :pred (parser:make-ty-predicate
+            :class (parser:make-identifier-src
+                    :name class
+                    :location location)
+            :types (list ty)
+            :location location)
+     :docstring nil
+     :methods methods
+     :location location
+     :head-location location
+     :compiler-generated t)))
 
 (defun make-runtime-repr-instance (type)
   (declare (type type-definition type))
@@ -566,59 +805,41 @@
   (let* ((location
            (source:location type))
          (types-package
-           (util:find-package "COALTON-LIBRARY/TYPES"))
+           (util:find-package "COALTON/TYPES"))
          (runtime-repr
            (util:find-symbol "RUNTIMEREPR" types-package))
          (runtime-repr-method
            (util:find-symbol "RUNTIME-REPR" types-package))
          (lisp-type
            (util:find-symbol "LISPTYPE" types-package))
-         (tvars
-           (loop :for i :below (tc:kind-arity (tc:tycon-kind (type-definition-type type)))
-                 :collect (parser:make-tyvar
-                           :location location
-                           :name (alexandria:format-symbol util:+keyword-package+ "~d" i))))
-         (ty
-           (parser:make-tycon :location location
-                              :name (type-definition-name type))))
+         (tvars (generated-instance-type-variables type)))
 
-    (loop :for tvar :in tvars
-          :do (setf ty (parser:make-tapp
-                        :location location
-                        :from ty
-                        :to tvar)))
-
-    (parser:make-toplevel-define-instance
-     :context nil
-     :pred (parser:make-ty-predicate
-            :class (parser:make-identifier-src
-                    :name runtime-repr
-                    :location location)
-            :types (list ty)
-            :location location)
-     :docstring nil
-     :methods (list
-               (parser:make-instance-method-definition
-                :name (parser:make-node-variable
-                       :location location
-                       :name runtime-repr-method)
-                :params (list
-                         (parser:make-pattern-wildcard
-                          :location location))
-                :body (parser:make-node-body
-                       :nodes nil
-                       :last-node (parser:make-node-lisp
-                                   :location location
-                                   :type (parser:make-tycon
-                                          :location location
-                                          :name lisp-type)
-                                   :vars nil
-                                   :var-names nil
-                                   :body (list (util:runtime-quote (type-definition-runtime-type type)))))
-                :location location
-                ;; Always inline RUNTIME-REPR so that other
-                ;; optimizations can kick off.
-                :inline (parser:make-attribute-inline :location location)))
+    (generated-instance-definition
+     type
+     runtime-repr
+     (list
+      ;; method runtime-repr
+      (parser:make-instance-method-definition
+       :name (parser:make-node-variable
+              :location location
+              :name runtime-repr-method)
+       :params (list
+                (parser:make-pattern-wildcard
+                 :location location))
+       :function-syntax-p t
+       :body (parser:make-node-body
+              :nodes nil
+              :last-node (parser:make-node-lisp
+                          :location location
+                          :output-types (list (parser:make-tycon
+                                               :location location
+                                               :name lisp-type))
+                          :vars nil
+                          :var-names nil
+                          :body (list (util:runtime-quote (type-definition-runtime-type type)))))
      :location location
-     :head-location location
-     :compiler-generated t)))
+     ;; Always inline RUNTIME-REPR so that other
+     ;; optimizations can kick off.
+     :inline (parser:make-attribute-inline :location location)))
+     :context nil
+     :ty (generated-instance-applied-type type tvars))))

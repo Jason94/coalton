@@ -42,9 +42,9 @@
   (declare (type substitution-list s1)
            (type substitution-list s2)
            (values substitution-list))
-  (let ((overlap (intersection s1 s2 :key #'substitution-from :test #'equalp)))
+  (let ((overlap (intersection s1 s2 :key #'substitution-from :test #'ty=)))
     (if (every (lambda (x)
-                 (equalp (apply-substitution s1 x) (apply-substitution s2 x)))
+                 (ty= (apply-substitution s1 x) (apply-substitution s2 x)))
                (mapcar #'substitution-from overlap))
         (concatenate 'list s1 s2)
         (error 'substitution-list-merge-error))))
@@ -67,16 +67,46 @@
   (:documentation "Apply the substitutions defined in SUBST-LIST on TYPE.")
   ;; For a type variable, substitute if it is in SUBST-LIST, otherwise return the original type
   (:method (subst-list (type tyvar))
-    (let ((subst (find type subst-list :key #'substitution-from :test #'equalp)))
+    (let ((subst (find type subst-list :key #'substitution-from :test #'ty=)))
       (if subst
           (substitution-to subst)
           type)))
   ;; For a type application, recurse down into all the types
   (:method (subst-list (type tapp))
-    (make-tapp
+    (let* ((alias (mapcar (lambda (alias) (apply-substitution subst-list alias))
+                          (ty-alias type)))
+           (from (apply-substitution subst-list (tapp-from type)))
+           (to (apply-substitution subst-list (tapp-to type)))
+           (applied-type (make-tapp :alias alias :from from :to to)))
+      (if (and (tapp-p applied-type)
+               (function-type-p applied-type))
+          (make-function-ty
+           :alias alias
+           :positional-input-types (list (tapp-to (tapp-from applied-type)))
+           :keyword-input-types nil
+           :keyword-open-p nil
+           :output-types (list (tapp-to applied-type)))
+          applied-type)))
+  (:method (subst-list (entry keyword-ty-entry))
+    (make-keyword-ty-entry
+     :keyword (keyword-ty-entry-keyword entry)
+     :type (apply-substitution subst-list (keyword-ty-entry-type entry))))
+  (:method (subst-list (type function-ty))
+    (make-function-ty
      :alias (mapcar (lambda (alias) (apply-substitution subst-list alias)) (ty-alias type))
-     :from (apply-substitution subst-list (tapp-from type))
-     :to (apply-substitution subst-list (tapp-to type))))
+     :positional-input-types (apply-substitution subst-list
+                                                (function-ty-positional-input-types type))
+     :keyword-input-types (apply-substitution subst-list
+                                             (function-ty-keyword-input-types type))
+     :keyword-open-p (function-ty-keyword-open-p type)
+     :output-types (normalize-function-output-types
+                    (apply-substitution subst-list
+                                        (function-ty-output-types type)))))
+  (:method (subst-list (type result-ty))
+    (make-result-ty
+     :alias (mapcar (lambda (alias) (apply-substitution subst-list alias)) (ty-alias type))
+     :output-types (apply-substitution subst-list
+                                       (result-ty-output-types type))))
   ;; Otherwise, do nothing
   (:method (subst-list (type ty))
     type)

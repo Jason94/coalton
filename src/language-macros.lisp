@@ -21,7 +21,7 @@ is equivalent to
 
 Note that this may copy the object or allocate memory."
 
-  (cl:let ((into (cl:ignore-errors (cl:find-symbol "INTO" "COALTON-LIBRARY/CLASSES"))))
+  (cl:let ((into (cl:ignore-errors (cl:find-symbol "INTO" "COALTON/CLASSES"))))
     (cl:assert into () "`as` macro does not have access to `into` yet.")
     (cl:if expr-supplied-p
            `(the ,type (,into ,expr))
@@ -36,7 +36,7 @@ Note that this may copy the object or allocate memory."
 
 is equivalent to
 
-    (the (Result :_ <type>) (tryInto <expr>))
+    (the (Optional <type>) (tryInto <expr>))
 
 and
 
@@ -44,19 +44,19 @@ and
 
 is equivalent to
 
-    (fn (expr) (the (Result :_ <type>) (tryInto expr))).
+    (fn (expr) (the (Optional <type>) (tryInto expr))).
 
 Note that this may copy the object or allocate memory."
 
-  (cl:let ((try-into (cl:ignore-errors (cl:find-symbol "TRYINTO" "COALTON-LIBRARY/CLASSES")))
-           (Result (cl:ignore-errors (cl:find-symbol "RESULT" "COALTON-LIBRARY/CLASSES"))))
+  (cl:let ((try-into (cl:ignore-errors (cl:find-symbol "TRYINTO" "COALTON/CLASSES")))
+           (Optional (cl:ignore-errors (cl:find-symbol "OPTIONAL" "COALTON/CLASSES"))))
     (cl:assert try-into () "`try-as` macro does not have access to `try-into` yet.")
-    (cl:assert Result () "`try-as` macro does not have access to `Result` yet.")
+    (cl:assert Optional () "`try-as` macro does not have access to `Optional` yet.")
     (cl:if expr-supplied-p
-           `(the (,Result :_ ,type) (,try-into ,expr))
+           `(the (,Optional ,type) (,try-into ,expr))
            (alexandria:with-gensyms (lexpr)
              `(fn (,lexpr)
-                (the (,Result :_ ,type) (,try-into ,lexpr)))))))
+                (the (,Optional ,type) (,try-into ,lexpr)))))))
 
 (defmacro unwrap-as (type cl:&optional (expr cl:nil expr-supplied-p))
   "A syntactic convenience for type casting.
@@ -77,8 +77,8 @@ is equivalent to
 
 Note that this may copy the object or allocate memory."
 
-  (cl:let ((try-into (cl:ignore-errors (cl:find-symbol "TRYINTO" "COALTON-LIBRARY/CLASSES")))
-           (unwrap (cl:ignore-errors (cl:find-symbol "UNWRAP" "COALTON-LIBRARY/CLASSES"))))
+  (cl:let ((try-into (cl:ignore-errors (cl:find-symbol "TRYINTO" "COALTON/CLASSES")))
+           (unwrap (cl:ignore-errors (cl:find-symbol "UNWRAP" "COALTON/CLASSES"))))
     (cl:assert try-into () "`try-as` macro does not have access to `try-into` yet.")
     (cl:assert unwrap () "`unwrap` macro does not have access to `unwrap` yet.")
     (cl:if expr-supplied-p
@@ -135,7 +135,7 @@ the value. The composition is thus the reverse order of `compose`.
 
 (defmacro make-list (cl:&rest forms)
   "Create a heterogeneous Coalton `List` of objects. This macro is
-deprecated; use `coalton-library/list:make`."
+deprecated; use `coalton/list:make`."
   (cl:labels
       ((list-helper (forms)
          (cl:if (cl:endp forms)
@@ -161,7 +161,7 @@ to the `format-string` via `cl:format` to produce an error message."
     `(let ((,datum-temp ,datum)
            ,@(cl:mapcar #'cl:list format-data-temps format-data))
        (progn
-         (lisp :any (,datum-temp ,@format-data-temps)
+         (lisp (-> :any) (,datum-temp ,@format-data-temps)
            (cl:assert ,datum-temp ()
                       ,(cl:format cl:nil
                                   "Assertion ~a failed: ~a"

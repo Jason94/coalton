@@ -4,12 +4,14 @@
    #:coalton-impl/typechecker/base
    #:coalton-impl/typechecker/pattern
    #:coalton-impl/typechecker/expression
+   #:coalton-impl/typechecker/control-flow
    #:coalton-impl/typechecker/traverse
    #:coalton-impl/typechecker/toplevel
    #:coalton-impl/typechecker/binding
    #:coalton-impl/typechecker/accessor
    #:coalton-impl/typechecker/partial-type-env
    #:coalton-impl/typechecker/parse-type
+   #:coalton-impl/typechecker/variance
    #:coalton-impl/typechecker/define-type
    #:coalton-impl/typechecker/derive
    #:coalton-impl/typechecker/define-class
@@ -17,4 +19,5 @@
    #:coalton-impl/typechecker/define
    #:coalton-impl/typechecker/define-instance
    #:coalton-impl/typechecker/specialize
+   #:coalton-impl/typechecker/type-string
    #:coalton-impl/typechecker/translation-unit))

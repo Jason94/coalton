@@ -51,7 +51,8 @@
                                    (source (source:make-source-string unparsed-type)))
                                (with-open-stream (stream (source:source-stream source))
                                  (let* ((ast-type (parser:parse-qualified-type
-                                                   (eclector.concrete-syntax-tree:read stream)
+                                                   (parser:with-reader-context stream
+                                                     (eclector.concrete-syntax-tree:read stream))
                                                    source))
                                         (parsed-type (tc:parse-ty-scheme ast-type env)))
                                    (is (tc:ty-scheme=
@@ -103,7 +104,11 @@ Returns (values SOURCE-PATHNAME COMPILED-PATHNAME)."
                                     (progn
                                       (format t "~%;; Allowing redefinition and continuing.~%")
                                       (invoke-restart 'continue))
-                                    (signal c)))))
+                                    (signal c))))
+                            ;; Test-file suites intentionally reuse package and
+                            ;; type names across cases, which can trigger
+                            ;; incidental redefinition style warnings on SBCL.
+                            (style-warning #'muffle-warning))
                (entry:compile source)
                nil)
            (source:source-warning (c)
@@ -121,7 +126,8 @@ Returns (values SOURCE-PATHNAME COMPILED-PATHNAME)."
   "Run the test file at PATHNAME."
   (format t "~&;; --- Running test file: ~A~%" pathname)
   (let ((file (test-file pathname))
-        (coalton-impl/settings:*coalton-print-unicode* nil))
+        (coalton-impl/settings:*coalton-print-unicode* nil)
+        (*readtable* (copy-readtable nil)))
     (loop :for (line number flags description program expected-error)
             :in (coalton-tests/loader:load-test-file file)
           :unless (position :disable flags)

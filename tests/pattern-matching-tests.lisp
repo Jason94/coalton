@@ -1,5 +1,81 @@
 (in-package #:coalton-native-tests)
 
+(coalton-toplevel 
+  (repr :enum)
+  (derive Eq)
+  (define-type MyEnum
+    Jalapeno
+    Onion
+    Lime))
+
+(define-test test-match-on-enum ()
+  (let ((declare f (MyEnum -> String))
+        (f (fn (x)
+             (match x
+               ((Jalapeno) "jalapeno")
+               ((Onion) "onion")
+               (_ "lime?")))))
+    (is (== (f Jalapeno)
+            "jalapeno"))
+    (is (== (f Onion)
+            "onion"))
+    (is (== (f Lime)
+            "lime?")))
+
+  (let ((declare f (MyEnum -> (Optional MyEnum)))
+        (f (fn (x)
+             (match x
+               ((Jalapeno) None)
+               ((Onion) None)
+               (x (Some x))))))
+    (is (== (f Jalapeno)
+            None))
+    (is (== (f Onion)
+            None))
+    (is (== (f Lime)
+            (Some Lime))))
+
+  (let ((declare f (Ordering -> String))
+        (f (fn (x)
+             (match x
+               ((LT) "lt")
+               ((EQ) "eq")
+               ((GT) "gt")))))
+    (is (== (f LT)
+            "lt"))
+    (is (== (f EQ)
+            "eq"))
+    (is (== (f GT)
+            "gt"))))
+
+(define-test test-match-on-boolean ()
+  (let ((f (fn (x)
+             (match x
+               ((True) 1)
+               ((False) 2)))))
+    (is (== (f True)
+            1))
+    (is (== (f False)
+            2)))
+
+  (let ((f (fn (x)
+             (match x
+               ((True) True)
+               (x x)))))
+    (is (== (f True)
+            True))
+    (is (== (f False)
+            False)))
+
+  (let ((f (fn (x)
+             (match x
+               ((True) 1)
+               (_ 2)))))
+    (is (== (f True)
+            1))
+    (is (== (f False)
+            2))))
+
 (define-test test-match-on-ints ()
   (let ((f (fn (x)
              (match x
@@ -102,3 +178,38 @@
     (is (== (Tuple 1 x) (prod-proj-1 x)))
     (let (Tuple 1 (= tpl (Tuple _ _))) = (prod-proj-1 x))
     (is (== x tpl))))
+
+(coalton-toplevel
+  (declare tuple-match-pair (Integer -> (Tuple Integer Integer)))
+  (define (tuple-match-pair x)
+    (Tuple x (1+ x)))
+
+  (declare tuple-match-bind-var (Integer -> (Tuple Integer Integer)))
+  (define (tuple-match-bind-var x)
+    (match (tuple-match-pair x)
+      (pair (Tuple (snd pair) (fst pair)))))
+
+  (declare tuple-match-bind-constructor (Integer -> (Tuple Integer Integer)))
+  (define (tuple-match-bind-constructor x)
+    (match (tuple-match-pair x)
+      ((Tuple a b) (Tuple b a))))
+
+  (declare tuple-match-wildcard-eligible (Integer -> Integer))
+  (define (tuple-match-wildcard-eligible x)
+    (match (tuple-match-pair x)
+      ((Tuple 0 b) b)
+      (_ x))))
+
+(define-test test-tuple-match-var ()
+  (is (== (Tuple 11 10)
+          (tuple-match-bind-var 10)))
+  (is (== (tuple-match-bind-var 42)
+          (tuple-match-bind-constructor 42))))
+
+(define-test test-tuple-match-wildcard ()
+  (is (== 1
+          (tuple-match-wildcard-eligible 0)))
+  (is (== 10
+          (tuple-match-wildcard-eligible 10)))
+  (is (== (tuple-match-wildcard-eligible 42)
+          (fst (tuple-match-pair 42)))))

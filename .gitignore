@@ -13,3 +13,13 @@ coverage-report/
 benchmarks/benchmarks-game/pidigits
 
 bench.json
+dependency-audit.png
+dependency-audit-all.png
+
+mine/mine
+mine/*.log
+*.app
+*.dmg
+*.exe
+mine.AppImage
+mine.core

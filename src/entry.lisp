@@ -34,6 +34,11 @@
 
         (env *global-environment*))
 
+    (setf (parser:program-defines program)
+          (tc:resolve-control-flow (parser:program-defines program)))
+    (setf (parser:program-instances program)
+          (tc:resolve-control-flow (parser:program-instances program)))
+
     (multiple-value-bind (type-definitions instances env)
         (tc:toplevel-define-type (parser:program-types program)
                                  (parser:program-structs program)
@@ -116,8 +121,9 @@
   (let ((env *global-environment*))
 
     (multiple-value-bind (ty preds accessors node subs)
-        (tc:infer-expression-type (parser:rename-variables node)
-                                  (tc:make-variable)
+        (tc:infer-expression-type (tc:resolve-control-flow
+                                   (parser:rename-variables node))
+                                  (tc:make-variable :kind tc:+kstar+ :allow-result-p t)
                                   nil
                                   (tc:make-tc-env :env env))
 
@@ -158,29 +164,12 @@
                     (codegen:make-function-table env))
                    env))))
 
-            (let* ((tvars
-                     (loop :for i :to (1- (length (remove-duplicates (tc:type-variables qual-ty)
-                                                                     :test #'equalp)))
-                           :collect (tc:make-variable)))
-                   (qual-type (tc:instantiate
-                               tvars
-                               (tc:ty-scheme-type scheme))))
-
-              (tc:tc-error "Unable to codegen"
-                           (tc:tc-note node
-                                       "expression has type ~A~{ ~S~}.~{ (~S)~} => ~S with unresolved constraint~A ~S"
-                                       (if settings:*coalton-print-unicode*
-                                           "∀"
-                                           "FORALL")
-                                       tvars
-                                       (tc:qualified-ty-predicates qual-type)
-                                       (tc:qualified-ty-type qual-type)
-                                       (if (= (length (tc:qualified-ty-predicates qual-type)) 1)
-                                           ""
-                                           "s")
-                                       (tc:qualified-ty-predicates qual-type))
-                           (tc:tc-note node
-                                       "Add a type assertion with THE to resolve ambiguity")))))))))
+            (tc:tc-error "Unable to codegen"
+                         (tc:tc-note node
+                                     "expression has ambiguous type ~A"
+                                     (tc:type-to-string scheme env))
+                         (tc:tc-note node
+                                     "Add a type assertion with THE to resolve ambiguity"))))))))
 
 (defmacro with-environment-updates (updates &body body)
   "Collect environment updates into a vector bound to UPDATES."
@@ -195,7 +184,8 @@
     `(let ((env *global-environment*))
        ,@(loop :for (fn . args) :in updates
                :collect `(setf env (,fn env ,@(mapcar #'util:runtime-quote args))))
-       (setf *global-environment* env))))
+       (setf *global-environment* env)
+       (tc:synchronize-type-variable-counter env))))
 
 (defun compile-coalton-toplevel (program)
   "Compile PROGRAM and return a single form suitable for direct inclusion by Lisp compiler. For implementing coalton-toplevel macro."

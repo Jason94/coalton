@@ -18,19 +18,26 @@
    #:location<
    #:make-location
    #:make-source-error
+   #:extract-source-text
    #:make-source-file
    #:make-source-string
    #:message
    #:note
+   #:note-type
+   #:notes
    #:secondary-note
+   #:emit-source-diagnostic
+   #:*source-diagnostic-hook*
    #:source-available-p
    #:source-error
+   #:source-file-path
    #:source-name
    #:source-stream
    #:source-warning
    #:span
    #:span-end
    #:span-start
+   #:severity
    #:warn
    #:with-context))
 
@@ -87,6 +94,9 @@
 (defgeneric source-name (source)
   (:documentation "The name of an error's source, suitable for reporting in errors. If the source is a file, SOURCE-NAME will be that file's absolute path."))
 
+(defgeneric source-file-path (source)
+  (:documentation "Return SOURCE's canonical file path for diagnostics, or NIL when SOURCE is not file-backed."))
+
 (defclass source ()
   ((name :initarg :name
          :initform nil
@@ -140,6 +150,14 @@ OFFSET indicates starting character offset within the file."
   (not (null (input-name self))))
 
 (defmethod source-name ((self source-file))
+  (or (original-name self)
+      (input-name self)))
+
+(defmethod source-file-path ((self source))
+  (declare (ignore self))
+  nil)
+
+(defmethod source-file-path ((self source-file))
   (or (original-name self)
       (input-name self)))
 
@@ -225,6 +243,9 @@ OFFSET indicates starting character offset within the file."
   (span nil
    :type span :read-only t))
 
+(defmethod location ((self location))
+  self)
+
 (defun end-location (location)
   "Return a new location that points at a zero-length span immediately past tht end of LOCATION."
   (make-location (location-source location)
@@ -247,6 +268,44 @@ If locations appear in different sources, compare the sources by name."
   (declare (type cons span))
   (%make-location :source source
                   :span span))
+
+(defgeneric extract-source-text (source span)
+  (:documentation "Extract text from SOURCE at SPAN. Returns NIL if SOURCE is unavailable or unreadable."))
+
+(defmethod extract-source-text ((source source-string) span)
+  "Extract text from a string source."
+  (when (and (source-available-p source) span)
+    (handler-case
+        (let* ((string (source-string source))
+               (start (span-start span))
+               (end (min (span-end span) (length string))))
+          (when (< start end)
+            (subseq string start end)))
+      (cl:error () nil))))
+
+(defmethod extract-source-text ((source source-file) span)
+  "Extract text from a file source."
+  (when (and (source-available-p source) span)
+    (handler-case
+        (let* ((start (span-start span))
+               (end (span-end span))
+               (length (- end start)))
+          (when (plusp length)
+            (with-open-stream (stream (source-stream source))
+              ;; Source spans are tracked in character offsets when reading
+              ;; through SOURCE-STREAM.
+              (file-position stream start)
+              (let* ((buffer (make-string length))
+                     (read-count (read-sequence buffer stream)))
+                (if (= read-count length)
+                    buffer
+                    (subseq buffer 0 read-count))))))
+      (cl:error () nil))))
+
+(defmethod extract-source-text (source span)
+  "Fallback method for unknown source types."
+  (declare (ignore source span))
+  nil)
 
 ;;; Notes
 
@@ -309,6 +368,9 @@ REPLACE is a 1-argument function that accepts and returns a string to suggest an
     :type ':help))
 
 (defvar *context* nil)
+
+(defvar *source-diagnostic-hook* nil
+  "When non-nil, called with each newly-constructed SOURCE-CONDITION for external diagnostic collection.")
 
 (defmacro with-context ((key message) &body body)
   `(let ((*context* (cons (cons ,key ,message) *context*)))
@@ -725,6 +787,18 @@ column numbers for a sequence of absolute stream offsets."
             :reader context))
   (:report report-source-condition))
 
+(defun emit-source-diagnostic (condition)
+  "Emit CONDITION on the external source-diagnostic hook and return it."
+  (when *source-diagnostic-hook*
+    (multiple-value-bind (_ hook-failure)
+        (ignore-errors
+          (funcall *source-diagnostic-hook* condition)
+          nil)
+      (declare (ignore _))
+      (when hook-failure
+        (cl:warn "Ignoring source diagnostic hook failure: ~A" hook-failure))))
+  condition)
+
 (define-condition source-error (source-condition cl:error)
   ()
   (:documentation "A user-facing error."))
@@ -734,9 +808,11 @@ column numbers for a sequence of absolute stream offsets."
 
 (defun error (message note &rest notes)
   "Signal an error related to one or more source locations"
-  (cl:error 'source-error
-            :message message
-            :notes (cons note notes)))
+  (let ((condition (make-condition 'source-error
+                                   :message message
+                                   :notes (cons note notes))))
+    (emit-source-diagnostic condition)
+    (cl:error condition)))
 
 (define-condition source-warning (source-condition warning)
   ()
@@ -747,6 +823,8 @@ column numbers for a sequence of absolute stream offsets."
 
 (defun warn (message note &rest notes)
   "Signal a warning related to one or more source locations."
-  (cl:warn 'source-warning
-           :message message
-           :notes (cons note notes)))
+  (let ((condition (make-condition 'source-warning
+                                   :message message
+                                   :notes (cons note notes))))
+    (emit-source-diagnostic condition)
+    (cl:warn condition)))

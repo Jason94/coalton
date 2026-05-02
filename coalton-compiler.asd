@@ -15,7 +15,6 @@
                "eclector"
                "eclector-concrete-syntax-tree"
                "float-features"
-               "fset"
                "named-readtables"
                "source-error"
                "trivial-gray-streams")
@@ -30,6 +29,7 @@
                (:module "algorithm"
                 :serial t
                 :components ((:file "tarjan-scc")
+                             (:file "avl-tree")
                              (:file "immutable-map")
                              (:file "immutable-listmap")
                              (:file "package")))
@@ -65,11 +65,23 @@
                              (:file "unify")
                              (:file "fundeps")
                              (:file "environment")
+                             (:file "type-string")
+                             (:file "variance")
+
+                             (:module "redef-detection"
+                              :pathname "../redef-detection/"
+                              :serial t
+                              :components ((:file "dependencies")
+                                           (:file "compatibility")
+                                           (:file "conditions")
+                                           (:file "package")))
+
                              (:file "lisp-type")
                              (:file "context-reduction")
                              (:file "stage-1")
                              (:file "pattern")
                              (:file "expression")
+                             (:file "control-flow")
                              (:file "traverse")
                              (:file "toplevel")
                              (:file "binding")
@@ -100,6 +112,7 @@
                              (:file "transformations")
                              (:file "ast-substitutions")
                              (:file "resolve-instance")
+                             (:file "resolve-instance-synthesized")
                              (:file "typecheck-node")
                              (:file "hoister")
                              (:file "translate-expression")
@@ -108,6 +121,7 @@
                              (:file "codegen-exception")
                              (:file "codegen-pattern")
                              (:file "codegen-type-definition")
+                             (:file "codegen-match")
                              (:file "codegen-expression")
                              (:file "codegen-class")
                              (:file "intrinsic-applications")
@@ -115,7 +129,6 @@
                              ;; Optimizations
                              (:file "monomorphize")
                              (:file "constant-propagation")
-                             (:file "canonicalizer")
                              (:file "inliner")
                              (:file "specializer")
                              (:file "optimizer")

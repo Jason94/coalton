@@ -42,10 +42,12 @@
   :pathname "library/"
   :serial t
   :components ((:file "set-float-traps")
-               (:file "utils")
-               (:file "types")
-               (:file "primitive-types")
-               (:file "classes")
+               (:ct-file "utils")
+               (:ct-file "types")
+               (:ct-file "primitive-types")
+               (:ct-file "classes")
+               (:ct-file "builtin")
+               (:ct-file "show")
                (:module "internal"
                 :serial t
                 :components ((:module "rbit"
@@ -57,69 +59,77 @@
                                (:file "sbcl-arm64"
                                 :if-feature (:and :sbcl :arm64))))))
                (:file "hash-defining-macros")
-               (:file "hash")
+               (:ct-file "hash")
                (:file "derivers")
-               (:file "builtin")
-               (:file "functions")
-               (:file "boolean")
-               (:file "bits")
-               (:file "symbol")
+               (:ct-file "functions")
+               (:ct-file "boolean")
+               (:ct-file "bits")
+               (:ct-file "symbol")
                (:module "math"
                 :serial t
-                :components ((:file "arith")
+               :components ((:ct-file "arith")
                              (:file "num-defining-macros")
-                             (:file "num")
-                             (:file "bounded")
-                             (:file "conversions")
-                             (:file "fraction")
-                             (:file "integral")
-                             (:file "real")
-                             (:file "complex")
-                             (:file "elementary")
-                             (:file "dyadic")
-                             (:file "dual")
-                             (:file "hyperdual")
+                             (:ct-file "num")
+                             (:ct-file "bounded")
+                             (:ct-file "conversions")
+                             (:ct-file "fraction")
+                             (:ct-file "integral")
+                             (:ct-file "real")
+                             (:ct-file "complex")
+                             (:ct-file "elementary")
                              (:file "package")))
+               (:ct-file "randomaccess")
+               (:ct-file "cell")
+               (:ct-file "tuple")
+               (:ct-file "optional")
+               (:ct-file "iterator")
+               (:ct-file "result")
+               (:ct-file "lisparray")
+               (:ct-file "list")
                (:module "experimental"
                 :serial t
-                :components ((:file "loops")
+                :components ((:ct-file "loops")
                              (:file "package")))
-               (:file "randomaccess")
-               (:file "cell")
-               (:file "tuple")
-               (:file "iterator")
-               (:file "optional")
-               (:file "result")
-               (:file "lisparray")
-               (:file "list")
-               (:file "vector")
-               (:file "char")
-               (:file "string")
-               (:file "slice")
-               (:file "hashtable")
-               (:file "hashmap")
-               (:file "queue")
+               (:ct-file "vector")
+               (:ct-file "char")
+               (:ct-file "string")
+               (:ct-file "slice")
+               (:ct-file "hashtable")
+               (:ct-file "iterator-hashtable")
+               (:ct-file "hashmap")
+               (:ct-file "queue")
                (:module "monad"
                 :serial t
-                :components ((:file "identity")
-                             (:file "state")
-                             (:file "environment")
-                             (:file "resultt")
-                             (:file "optionalt")
-                             (:file "free")
-                             (:file "freet")))
-               (:file "ordtree")
-               (:file "ordmap")
-               (:file "seq")
-               (:file "system")
-               (:file "file")
+                :components ((:ct-file "classes")
+                             (:ct-file "identity")
+                             (:ct-file "state")
+                             (:ct-file "statet")
+                             (:ct-file "environment")
+                             (:ct-file "resultt")
+                             (:ct-file "optionalt")
+                             (:ct-file "free")
+                             (:ct-file "freet")))
+               ;; Unfortunately this had to be split from the rest of the
+               ;; experimental files because of intermediate dependencies.
+               (:module "experimental-do-control"
+                :pathname "experimental/"
+                :serial t
+                :components ((:ct-file "do-control-core")
+                             (:ct-file "do-control-loops")
+                             (:ct-file "do-control-loops-adv")))
+               (:ct-file "ordtree")
+               (:ct-file "ordmap")
+               (:ct-file "seq")
+               (:ct-file "system")
+               (:ct-file "file")
+
                (:file "prelude")))
 
 (cl:when (cl:member (uiop:getenv "COALTON_PORTABLE_BIGFLOAT") '("1" "true" "t") :test #'cl:equalp)
   (cl:pushnew ':coalton-portable-bigfloat cl:*features*))
 
-(asdf:defsystem "coalton/library/big-float"
-  :description "An arbitrary precision floating point library."
+(asdf:defsystem "coalton/xmath"
+  :description "Extended mathematics library for Coalton."
   :author "Coalton contributors (https://github.com/coalton-lang/coalton)"
   :license "MIT"
   :version (:read-file-form "VERSION.txt")
@@ -127,42 +137,50 @@
                     (let (#+sbcl (sb-ext:*derive-function-types* t)
                           #+sbcl (sb-ext:*block-compile-default* :specified))
                       (funcall compile)))
+  :defsystem-depends-on ("coalton-asdf")
   :depends-on ("coalton"
                "coalton/library"
+               "computable-reals"
                (:feature (:and (:not :coalton-portable-bigfloat) :sbcl) "sb-mpfr")
                (:feature (:and (:not :coalton-portable-bigfloat) :sbcl) "sb-gmp"))
-  :pathname "library/big-float/"
+  :pathname "xmath/"
   :serial t
-  :components ((:file "package")
-               (:file "impl-sbcl"
-                :if-feature (:and (:not :coalton-portable-bigfloat) :sbcl))
-               (:file "impl-default"
-                :if-feature (:or :coalton-portable-bigfloat (:not :sbcl)))))
+  :components ((:ct-file "dyadic")
+               (:ct-file "dual")
+               (:ct-file "hyperdual")
+               (:ct-file "fft")
+               (:module "big-float"
+                :serial t
+                :components ((:file "package")
+                             (:ct-file "impl-sbcl"
+                              :if-feature (:and (:not :coalton-portable-bigfloat) :sbcl))
+                             (:ct-file "impl-default"
+                              :if-feature (:or :coalton-portable-bigfloat (:not :sbcl)))))
+               (:module "computable-reals"
+                :serial t
+                :components ((:ct-file "computable-reals")))
+               (:ct-file "realalgebraic")))
+
+(asdf:defsystem "coalton/library/big-float"
+  :description "Deprecated. Use coalton/xmath."
+  :author "Coalton contributors (https://github.com/coalton-lang/coalton)"
+  :license "MIT"
+  :version (:read-file-form "VERSION.txt")
+  :depends-on ("coalton/xmath"))
 
 (asdf:defsystem "coalton/library/computable-reals"
-  :description "A Coalton interface for computable-reals (https://github.com/stylewarning/computable-reals)"
+  :description "Deprecated. Use coalton/xmath."
   :author "Coalton contributors (https://github.com/coalton-lang/coalton)"
   :license "MIT"
   :version (:read-file-form "VERSION.txt")
-  :pathname "library/computable-reals"
-  :depends-on ("coalton"
-               "computable-reals")
-  :serial t
-  :components ((:file "computable-reals")))
+  :depends-on ("coalton/xmath"))
 
 (asdf:defsystem "coalton/library/algorithms"
+  :description "Deprecated. Use coalton/xmath."
   :author "Coalton contributors (https://github.com/coalton-lang/coalton)"
   :license "MIT"
   :version (:read-file-form "VERSION.txt")
-  :around-compile (lambda (compile)
-                    (let (#+sbcl (sb-ext:*derive-function-types* t)
-                          #+sbcl (sb-ext:*block-compile-default* ':specified))
-                      (funcall compile)))
-  :depends-on ("coalton"
-               "coalton/library")
-  :pathname "library/algorithms"
-  :serial t
-  :components ((:file "fft")))
+  :depends-on ("coalton/xmath"))
 
 (asdf:defsystem "coalton/testing"
   :author "Coalton contributors (https://github.com/coalton-lang/coalton)"
@@ -174,35 +192,6 @@
   :serial t
   :components ((:file "package")
                (:file "coalton-native-test-utils")))
-
-(asdf:defsystem "coalton/benchmarks"
-  :author "Coalton contributors (https://github.com/coalton-lang/coalton)"
-  :license "MIT"
-  :version (:read-file-form "VERSION.txt")
-  :around-compile (lambda (compile)
-                    (let (#+sbcl (sb-ext:*derive-function-types* t)
-                          #+sbcl (sb-ext:*block-compile-default* :specified))
-                      (funcall compile)))
-
-  :depends-on ("coalton"
-               "coalton/library/big-float"
-               "trivial-benchmark"
-               "yason")
-  :pathname "benchmarks"
-  :serial t
-  :components ((:file "package")
-               (:file "fibonacci")
-               (:file "big-float")
-               (:file "pi")
-               (:file "seq")
-               (:file "matrix")
-               (:file "mapping")
-               (:module "gabriel-benchmarks"
-                :serial t
-                :components ((:file "tak")
-                             (:file "stak")
-                             (:file "takl")
-                             (:file "takr")))))
 
 ;;; we need to inspect the sbcl version in order to decide which version of the hashtable shim to load,
 ;;; because 2.1.12 includes (or will include) a bugfix that allows a cleaner, more maintainable
@@ -235,10 +224,9 @@
   :license "MIT"
   :version (:read-file-form "VERSION.txt")
   :depends-on ("coalton"
-               "coalton/library/big-float"
-               "coalton/library/computable-reals"
-               "coalton/library/algorithms"
+               "coalton/xmath"
                "html-entities"
+               "spinneret"
                "yason"
                "uiop")
   :around-compile (lambda (compile)
@@ -251,6 +239,7 @@
                (:file "model")
                (:file "string")
                (:file "markdown")
+               (:file "html")
                (:file "hugo")
                (:file "main")))
 
@@ -258,9 +247,12 @@
   :description "Tests for COALTON."
   :author "Coalton contributors (https://github.com/coalton-lang/coalton)"
   :license "MIT"
+  :defsystem-depends-on ("coalton-asdf")
   :depends-on ("coalton"
                "coalton/library/big-float"
                "coalton/library/algorithms"
+               "coalton/doc"
+               "coalton/xmath"
                "coalton/testing"
                "fiasco"
                "quil-coalton/tests"
@@ -274,60 +266,72 @@
                (:file "loader")
                (:file "utilities")
                (:file "source-tests")
+               (:file "preserve-case-tests")
                (:file "tarjan-scc-tests")
+               (:file "avl-tree-tests")
                (:file "reader-tests")
                (:file "error-tests")
                (:module "parser"
                 :serial t
                 :components ((:file "cursor-tests")))
                (:file "entry-tests")
+               (:file "codegen-pattern-tests")
                (:file "toplevel-tests")
+               (:file "doc-tests")
                (:file "type-inference-tests")
                (:file "fundep-tests")
                (:file "fundep-fib-test")
-               (:file "runtime-tests")
+               (:ct-file "runtime-tests")
                (:module "typechecker"
                 :serial t
-                :components ((:file "lisp-type-tests")))
+                :components ((:file "lisp-type-tests")
+                             (:file "dictionary-resolution-tests")))
                (:file "environment-persist-tests")
                (:file "coalton-tests")
                (:file "shortcut-tailcall-tests")
                (:file "slice-tests")
-               (:file "float-tests")
-               (:file "dual-tests")
-               (:file "hyperdual-tests")
-               (:file "quantize-tests")
+               (:ct-file "float-tests")
+               (:ct-file "dual-tests")
+               (:ct-file "hyperdual-tests")
+               (:ct-file "quantize-tests")
+               (:ct-file "realalgebraic-tests")
                (:file "hashtable-tests")
                (:file "hashmap-tests")
                (:file "iterator-tests")
                (:file "call-coalton-from-lisp")
                (:file "bits-tests")
                (:file "vector-tests")
+               (:file "queue-tests")
                (:file "string-tests")
                (:file "optional-tests")
+               (:file "ordtree-tests")
+               (:file "ordmap-tests")
                (:file "recursive-let-tests")
+               (:file "multiple-values-tests")
                (:file "class-tests")
                (:file "struct-tests")
                (:file "type-alias-tests")
                (:file "list-tests")
                (:file "lisparray-tests")
-               (:file "red-black-tests")
                (:file "seq-tests")
                (:file "pattern-matching-tests")
                (:file "looping-native-tests")
-               (:file "monomorphizer-tests")
-               (:file "inliner-tests")
+               (:ct-file "monomorphizer-tests")
+               (:ct-file "inliner-tests")
                (:file "inliner-tests-1") ; must come after inliner-tests
-               (:file "deriver-tests")
-               (:file "file-tests")
-               (:file "experimental-tests")
+               (:ct-file "deriver-tests")
+               (:ct-file "file-tests")
+               (:ct-file "experimental-tests")
                (:file "exceptions")
                (:module "monad"
                 :serial t
-                :components ((:file "optionalt")
-                             (:file "resultt")
-                             (:file "environment")))
+                :components ((:ct-file "optionalt")
+                             (:ct-file "resultt")
+                             (:ct-file "environment")
+                             (:ct-file "statet")))
                (:module "algorithms-tests"
                 :serial t
-                :components ((:file "fft-tests")))))
-
+                :components ((:file "fft-tests")))
+               (:module "redef-detection"
+                :serial t
+                :components ((:file "interactive-tests")))))

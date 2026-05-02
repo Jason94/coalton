@@ -162,11 +162,24 @@ If not, returns NIL"
              (make-node-direct-application
               :type (node-type node)
               :properties (node-properties node)
-              :rator-type (tc:make-function-type*
-                           (mapcar #'node-type (node-direct-application-rands node))
-                           (tc:function-return-type (node-type node)))
+              :rator-type (tc:make-function-ty
+                           :positional-input-types (mapcar #'node-type (node-direct-application-rands node))
+                           :keyword-input-types
+                           (typecase (node-direct-application-rator-type node)
+                             (tc:function-ty
+                               (tc:function-ty-keyword-input-types (node-direct-application-rator-type node)))
+                             (t
+                               nil))
+                           :keyword-open-p
+                           (typecase (node-direct-application-rator-type node)
+                             (tc:function-ty
+                              (tc:function-ty-keyword-open-p (node-direct-application-rator-type node)))
+                             (t
+                              nil))
+                           :output-types (tc:function-output-types (node-direct-application-rator-type node)))
               :rator (node-direct-application-rator node)
-              :rands (node-direct-application-rands node))))
+              :rands (node-direct-application-rands node)
+              :keyword-rands (node-direct-application-keyword-rands node))))
 
     (traverse
      node

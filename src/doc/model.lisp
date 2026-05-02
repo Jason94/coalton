@@ -25,9 +25,14 @@
    (#:env #:coalton/doc/environment)
    (#:entry #:coalton-impl/entry))
   (:export
+   ;; Backend properties
+   #:file-line-offsets
+
    ;; object classes and properties
    #:coalton-object
    #:object-aname
+   #:package-qualified-anchor
+   #:sanitize-anchor-component
    #:source
    #:source-span
    #:object-docstring
@@ -70,7 +75,14 @@
    #:write-link
    #:object-link
    #:source-available-p
-   #:source-location-href))
+
+   ;; source-name lookup utilities
+   #:lookup-type-source-name
+   #:lookup-class-source-name
+   #:lookup-constructor-source-name
+
+   ;; source-definition lookup utilities
+   #:source-location-link))
 
 (in-package #:coalton/doc/model)
 
@@ -95,18 +107,30 @@
   (and (source object)
        (source:source-available-p (source object))))
 
-(defun source-location-href (object)
-  (when (source-available-p object)
-    (format nil "~a/~a"
-            *remote*
-            (remove-prefix (ensure-suffix #\/ *local*)
-                           (source:source-name (source object))))))
-
 (defun source-span (object)
   (source:location-span (object-location object)))
 
 (defgeneric object-aname (self)
   (:documentation "The link target of a thing: <name>-class, e.g."))
+
+(defun sanitize-anchor-component (string)
+  "Convert STRING into a lowercase anchor component using `-` for non-alphanumerics."
+  (string-downcase
+   (map 'string
+        (lambda (char)
+          (if (alphanumericp char)
+              char
+              #\-))
+        string)))
+
+(defun package-qualified-anchor (package name suffix)
+  "Return an anchor name with PACKAGE's sanitized name prefixed to NAME."
+  (let ((package-prefix (and package
+                             (sanitize-anchor-component (package-name package)))))
+    (format nil "~@[~A-~]~(~A-~A~)"
+            package-prefix
+            name
+            suffix)))
 
 (defun ensure-suffix (char string)
   "If STRING doesn't end with CHAR, append it."
@@ -170,13 +194,19 @@
            :instances (sort-objects applicable-instances)))))
 
 (defmethod object-name ((object coalton-type))
-  (symbol-name (tc:type-entry-name (type-entry object))))
+  (or (tc:type-entry-source-name (type-entry object))
+      (symbol-name (tc:type-entry-name (type-entry object)))))
 
 (defmethod object-type ((object coalton-type))
   "TYPE")
 
 (defmethod object-aname ((object coalton-type))
-  (format nil "~(~A-type~)" (object-name object)))
+  (let ((entry (type-entry object)))
+    (package-qualified-anchor
+     (symbol-package (tc:type-entry-name entry))
+     (or (tc:type-entry-source-name entry)
+         (symbol-name (tc:type-entry-name entry)))
+     "type")))
 
 (defclass coalton-struct (coalton-object)
   ((type-entry :initarg :type-entry
@@ -203,17 +233,23 @@
 
 (defmethod object-name ((self coalton-struct))
   (let* ((entry (type-entry self))
-         (name (tc:type-entry-name entry)))
+         (name (tc:type-entry-name entry))
+         (source-name (or (tc:type-entry-source-name entry)
+                          (symbol-name name))))
     (format nil "~A~{ ~S~}"
-            (symbol-name name)
+            source-name
             (tc:type-entry-tyvars entry))))
 
 (defmethod object-type ((self coalton-struct))
   "STRUCT")
 
 (defmethod object-aname ((self coalton-struct))
-  (format nil "~(~A-type~)"
-          (symbol-name (tc:type-entry-name (type-entry self)))))
+  (let ((entry (type-entry self)))
+    (package-qualified-anchor
+     (symbol-package (tc:type-entry-name entry))
+     (or (tc:type-entry-source-name entry)
+         (symbol-name (tc:type-entry-name entry)))
+     "type")))
 
 (defclass coalton-class (coalton-object)
   ((class-entry :initarg :class
@@ -255,13 +291,19 @@
   (env:class-instances (class-entry self)))
 
 (defmethod object-name ((self coalton-class))
-  (symbol-name (tc:ty-class-name (class-entry self))))
+  (or (tc:ty-class-source-name (class-entry self))
+      (symbol-name (tc:ty-class-name (class-entry self)))))
 
 (defmethod object-type ((object coalton-class))
   "CLASS")
 
 (defmethod object-aname ((self coalton-class))
-  (format nil "~(~A-class~)" (object-name self)))
+  (let ((entry (class-entry self)))
+    (package-qualified-anchor
+     (symbol-package (tc:ty-class-name entry))
+     (or (tc:ty-class-source-name entry)
+         (symbol-name (tc:ty-class-name entry)))
+     "class")))
 
 ;;; class coalton-value
 
@@ -291,7 +333,7 @@
                 (symbol-name name)
                 (tc:lookup-function-source-parameter-names ; todo -> env
                  entry:*global-environment* name))
-        (symbol-name name))))
+        (lookup-constructor-source-name name))))
 
 (defmethod object-type ((object coalton-value))
   (if (%function-p object)
@@ -299,16 +341,24 @@
       "VALUE"))
 
 (defmethod object-aname ((object coalton-value))
-  (format nil "~(~A-value~)" (symbol-name (tc:name-entry-name (name-entry object)))))
+  (let ((name (tc:name-entry-name (name-entry object))))
+    (package-qualified-anchor
+     (symbol-package name)
+     (symbol-name name)
+     "value")))
 
 ;;; class coalton-package
 
 (defclass coalton-package ()
   ((package :initarg :package
-            :reader lisp-package)))
+            :reader lisp-package)
+   (reexported-symbols :initarg :reexported-symbols
+                       :initform nil
+                       :reader reexported-symbols
+                       :documentation "If T, this package's documentation will include re-exported symbols.")))
 
-(defun make-coalton-package (package)
-  (make-instance 'coalton-package :package package))
+(defun make-coalton-package (package &key (reexported-symbols nil))
+  (make-instance 'coalton-package :package package :reexported-symbols reexported-symbols))
 
 (defmethod object-docstring ((self coalton-package))
   (documentation (lisp-package self) t))
@@ -317,11 +367,12 @@
   (string-upcase (package-name (lisp-package self))))
 
 (defmethod object-aname ((self coalton-package))
-  (format nil "~A-package" (string-downcase (package-name (lisp-package self)))))
+  (format nil "~A-package"
+          (sanitize-anchor-component (package-name (lisp-package self)))))
 
 (defun package-objects (coalton-package)
   (let ((package (lisp-package coalton-package)))
-    (find-objects :package package)))
+    (find-objects :package package :reexported-symbols (reexported-symbols coalton-package))))
 
 ;; Helpers for API queries
 
@@ -339,10 +390,13 @@
       (tc:type-entry-name type-entry)))
 
 (defun stdlib-p (symbol)
-  "A standard library package is any package with the exact name 'coalton' or whose name starts with 'coalton-library'."
-  (let ((name (package-name (symbol-package symbol))))
-    (or (string-equal name "COALTON")
-        (eql 0 (search "COALTON-LIBRARY" name)))))
+  "A standard library package is any package with the exact name 'coalton' or whose name starts with 'coalton/'."
+  (let ((pkg (symbol-package symbol)))
+    (if (null pkg)
+        nil
+        (let ((name (package-name pkg)))
+          (or (string-equal name "COALTON")
+              (eql 0 (search "COALTON/" name)))))))
 
 ;;; class coalton-macro
 
@@ -417,11 +471,18 @@
   (documentation (coalton-macro-name x) 'function))
 
 (defmethod object-aname ((x coalton-macro))
-  (substitute
-   #\- #\/
-   (format nil "~(~A-~A-macro~)"
-           (package-name (symbol-package (coalton-macro-name x)))
-           (symbol-name (coalton-macro-name x)))))
+  (let ((name (coalton-macro-name x)))
+    (package-qualified-anchor
+     (symbol-package name)
+     (symbol-name name)
+     "macro")))
+
+(defmethod object-aname ((ty tc:tycon))
+  (let ((tcon-name (tc:tycon-name ty)))
+    (package-qualified-anchor
+     (symbol-package tcon-name)
+     (lookup-type-source-name tcon-name)
+     "type")))
 
 ;;; Public API
 
@@ -429,23 +490,24 @@
   (not (endp (env:find-names :type ':value
                              :package package))))
 
-(defun find-values (&key package)
+(defun find-values (&key package reexported-symbols)
   (mapcar #'make-coalton-value
           (env:find-names :type ':value
-                          :package package)))
+                          :package package
+                          :reexported-symbols reexported-symbols)))
 
 (defun has-classes-p (package)
   (not (endp (env:find-classes :package package))))
 
-(defun find-classes (&key package)
+(defun find-classes (&key package reexported-symbols)
   (mapcar #'make-coalton-class
-          (env:find-classes :package package)))
+          (env:find-classes :package package :reexported-symbols reexported-symbols)))
 
 (defun has-types-p (package)
   "T if package defines any types."
   (not (endp (env:find-types :package package))))
 
-(defun find-types (&key package)
+(defun find-types (&key package reexported-symbols)
   "Find all types defined in PACKAGE."
   (mapcar (lambda (entry)
             (make-coalton-type entry
@@ -453,7 +515,7 @@
                                               (env:find-constructors :package package))
                                (remove-if-not (alexandria:curry #'applicable-p entry)
                                               (env:find-instances))))
-          (env:find-types :package package)))
+          (env:find-types :package package :reexported-symbols reexported-symbols)))
 
 (defun has-macros-p (package)
   (do-external-symbols (v package nil)
@@ -467,11 +529,11 @@
       (has-classes-p package)
       (has-macros-p package)))
 
-(defun find-objects (&key package)
+(defun find-objects (&key package reexported-symbols)
   "Find all Coalton OBJECTS, optionally retstricting to objects defined in PACKAGE."
-  (append (find-types :package package)
-          (find-values :package package)
-          (find-classes :package package)
+  (append (find-types :package package :reexported-symbols reexported-symbols)
+          (find-values :package package :reexported-symbols reexported-symbols)
+          (find-classes :package package :reexported-symbols reexported-symbols)
           (find-macros :package package)))
 
 (defun find-packages ()
@@ -483,6 +545,79 @@
     (sort-objects
      (mapcar #'make-coalton-package
              (remove-if-not #'has-objects-p packages)))))
+
+;;; Source-name lookup utilities
+
+(defun lookup-type-source-name (symbol)
+  "Look up the source-name for a type symbol, falling back to symbol-name."
+  (let ((entry (tc:lookup-type entry:*global-environment* symbol :no-error t)))
+    (if entry
+        (tc:type-entry-source-name entry)
+        (symbol-name symbol))))
+
+(defun lookup-class-source-name (symbol)
+  "Look up the source-name for a class symbol, falling back to symbol-name."
+  (let ((entry (tc:lookup-class entry:*global-environment* symbol :no-error t)))
+    (if entry
+        (tc:ty-class-source-name entry)
+        (symbol-name symbol))))
+
+(defun lookup-constructor-source-name (symbol)
+  "Look up the source-name for a constructor symbol, falling back to symbol-name."
+  (let ((entry (tc:lookup-constructor entry:*global-environment* symbol :no-error t)))
+    (if entry
+        (tc:constructor-entry-source-name entry)
+        (symbol-name symbol))))
+
+;;; Source-definition lookup utilities
+
+(defun find-line-offsets (stream)
+  "Compute the offsets of lines in a stream."
+  (file-position stream 0)
+  (loop :with index := 0
+        :for char := (read-char stream nil nil)
+        :unless char
+          :return (coerce (cons 0 offsets) 'vector)
+        :when (char= char #\Newline)
+          :collect (1+ index) :into offsets
+        :do (incf index)))
+
+(defun source-location-href (object)
+  (when (source-available-p object)
+    (format nil "~a/~a"
+            *remote*
+            (remove-prefix (ensure-suffix #\/ *local*)
+                           (source:source-name (source object))))))
+
+(defun line-number (backend source offset)
+  (let ((line-offsets (gethash (source:source-name source)
+                        (slot-value backend 'file-line-offsets))))
+    (unless line-offsets
+      (with-open-stream (stream (source:source-stream source))
+        (setf line-offsets (find-line-offsets stream)))
+      (setf (gethash (source:source-name source)
+                     (slot-value backend 'file-line-offsets))
+            line-offsets))
+    (labels ((%find (lo hi)
+               (let ((probe (+ lo (floor (/ (- hi lo) 2)))))
+                 (when (= probe lo)
+                   (return-from line-number (1+ probe)))
+                 (cond ((< offset (aref line-offsets probe))
+                        (setf hi probe))
+                       (t
+                        (setf lo probe)))
+                 (%find lo hi))))
+      (%find 0 (length line-offsets)))))
+
+(defun source-location-link (backend object)
+  (if (not (source-available-p object))
+      ""
+      (let ((source (source object))
+            (span (source-span object)))
+        (format nil "~a#L~a-L~a"
+                (source-location-href object)
+                (line-number backend source (car span))
+                (line-number backend source (cdr span))))))
 
 ;;; Output utilities
 

@@ -20,7 +20,7 @@ Coalton integrates directly into Common Lisp:
 ```lisp
 (defpackage #:differentiation
   (:use #:coalton #:coalton-prelude)
-  (:local-nicknames (#:sym #:coalton-library/symbol))
+  (:local-nicknames (#:sym #:coalton/symbol))
   (:export #:Expr #:EConst #:EVar #:E+ #:E*)
   (:export #:diff #:t #:d/dt))
 
@@ -39,7 +39,7 @@ Coalton integrates directly into Common Lisp:
     (E*     (Expr :t) (Expr :t)))
 
   ;; The classic `diff` function, in Coalton.
-  (declare diff (Num :t => sym:Symbol -> Expr :t -> Expr :t))
+  (declare diff (Num :t => sym:Symbol * Expr :t -> Expr :t))
   (define (diff x f)
     "Compute the derivative of `f` with respect to `x`."
     (match f
@@ -57,9 +57,9 @@ Coalton integrates directly into Common Lisp:
   (define t (sym:make-symbol "t"))
 
   (declare d/dt (Num :t => Expr :t -> Expr :t))
-  (define d/dt
+  (define (d/dt f)
     "The time derivative operator."
-    (diff t)))
+    (diff t f)))
 ```
 
 It also works directly in the REPL:
@@ -94,7 +94,7 @@ Coalton is currently used in production to build defense and [quantum computing 
 > [!WARNING]
 > Coalton has **not** reached "1.0" yet. This means that, from time to time, you may have a substandard user experience. While we try to be ANSI-conforming, Coalton is currently only tested on recent versions of SBCL, Allegro CL, and Clozure CL.
 >
-> Coalton will **not** be in Quicklisp until it reaches its first stable version.
+> The version of Coalton that may be in Quicklisp may not be up-to-date.
 
 **Prepare**: Install [SBCL](http://www.sbcl.org/platform-table.html) (on macOS with Homebrew: `brew install sbcl`). Install Quicklisp by following instructions [here](https://www.quicklisp.org/beta/#installation). (The step command involving `gpg` is not needed.) After installing Quicklisp, you should have a `quicklisp` folder which will make installing Coalton easier.
 
@@ -107,7 +107,9 @@ Coalton is currently used in production to build defense and [quantum computing 
 > [!NOTE] 
 > Running the Coalton test suite on SBCL requires [GNU MPFR](https://www.mpfr.org/mpfr-current/mpfr.html#Installing-MPFR) in order to run `Big-Float` tests. If you would like to run tests without installing `gnu-mpfr`, you can use Coalton's portable `Big-Float` implementation by running `(pushnew :coalton-portable-bigfloat *features*)` before loading Coalton.
 
-**Learn**: Start with [*Intro to Coalton*](docs/intro-to-coalton.md) and the [standard library reference](https://coalton-lang.github.io/reference/), and then take a peek at the [examples directory](examples/). It may also be helpful to check out the [introductory blog post](https://coalton-lang.github.io/20211010-introducing-coalton/).
+**Learn**: Start with [*Whirlwind Tour of Coalton*](docs/manual/site/topics/whirlwind-tour.md), the [language manual](https://coalton-lang.github.io/manual/), and the [standard library reference](https://coalton-lang.github.io/reference/), and then take a peek at the [examples directory](examples/). It may also be helpful to check out the [introductory blog post](https://coalton-lang.github.io/20211010-introducing-coalton/).
+
+**Open Source Community**: [Awesome Coalton](https://github.com/Jason94/awesome-coalton) has a list of community-built libraries, applications, and examples, that you can use in your own projects or as examples to learn from.
 
 ## What's Here?
 

@@ -12,8 +12,12 @@
    #:coalton-impl/typechecker/parse-type
    #:infer-predicate-kinds)
   (:import-from
+   #:coalton-impl/typechecker/tc-env
+   #:tc-env-extend-type-variable-scope)
+  (:import-from
    #:coalton-impl/typechecker/define
    #:make-tc-env
+   #:check-bindings-for-invalid-recursion
    #:infer-expl-binding-type)
   (:local-nicknames
    (#:a #:alexandria)
@@ -21,13 +25,64 @@
    (#:source #:coalton-impl/source)
    (#:util #:coalton-impl/util)
    (#:parser #:coalton-impl/parser)
-   (#:tc #:coalton-impl/typechecker/stage-1))
+   (#:tc #:coalton-impl/typechecker/stage-1)
+   (#:type-string #:coalton-impl/typechecker/type-string))
   (:export
    #:toplevel-define-instance           ; FUNCTION
    #:toplevel-typecheck-instance        ; FUNCTION
    ))
 
 (in-package #:coalton-impl/typechecker/define-instance)
+
+(defun type-object-string (object env)
+  (let ((settings:*coalton-print-unicode* nil))
+    (type-string:type-to-string object env)))
+
+(defun instance-scoped-method-substitutions (outer-method-types instance-scoped-tvars)
+  (declare (type list outer-method-types)
+           (type tc:tyvar-list instance-scoped-tvars)
+           (values tc:substitution-list &optional))
+  (let ((scoped-tvar-table (make-hash-table :test #'eq)))
+    (loop :for scoped-tvar :in instance-scoped-tvars
+          :for source-name := (tc:tyvar-source-name scoped-tvar)
+          :when source-name
+            :do (setf (gethash source-name scoped-tvar-table) scoped-tvar))
+    (loop :for method-tvar :in (tc:type-variables outer-method-types)
+          :for source-name := (tc:tyvar-source-name method-tvar)
+          :for scoped-tvar := (and source-name
+                                   (gethash source-name scoped-tvar-table))
+          :when (and scoped-tvar
+                     (not (tc:ty= method-tvar scoped-tvar)))
+            :collect (tc:make-substitution
+                      :from method-tvar
+                      :to scoped-tvar))))
+
+(defun check-instance-predicate-not-narrowed (method pred context subs env)
+  "Reject instance methods that narrow the instance predicate.
+
+The instance head and its context are implicitly universally quantified over
+the whole instance. Method checking may alpha-rename those variables, but it
+must not collapse distinct variables or specialize one to a concrete type.
+"
+  (declare (type instance-method-definition method)
+           (type tc:ty-predicate pred)
+           (type tc:ty-predicate-list context)
+           (type tc:substitution-list subs)
+           (type tc:environment env)
+           (values null))
+  (let* ((sentinel (tc:make-variable))
+         (before (tc:predicates-to-scheme (cons pred context) sentinel))
+         (narrowed-pred (tc:apply-substitution subs pred))
+         (narrowed-context (tc:apply-substitution subs context))
+         (after (tc:predicates-to-scheme (cons narrowed-pred narrowed-context)
+                                         sentinel)))
+    (unless (tc:ty-scheme= before after)
+      (tc-error "Instance method type is too specific"
+                (tc-location
+                 (source:location (instance-method-definition-name method))
+                 "The method definition narrows instance ~A to ~A."
+                 (type-object-string pred env)
+                 (type-object-string narrowed-pred env))))))
 
 (defun toplevel-define-instance (instances env)
   (declare (type parser:toplevel-define-instance-list instances)
@@ -68,7 +123,10 @@
 
     ;; Define type variables in the environment
     (loop :for var :in (parser:collect-type-variables (list unparsed-pred unparsed-context))
-          :do (partial-type-env-add-var partial-env (parser:tyvar-name var)))
+          :do (partial-type-env-add-var partial-env
+                                        (parser:tyvar-name var)
+                                        (or (parser:tyvar-source-name var)
+                                            (parser:tyvar-name var))))
 
     (let* ((ksubs nil)
 
@@ -131,7 +189,8 @@
                 :codegen-sym instance-codegen-sym
                 :method-codegen-syms method-codegen-syms
                 :method-codegen-inline-p method-codegen-inline-p
-                :docstring (source:docstring instance))))
+                :docstring (source:docstring instance)
+                :location (parser:toplevel-define-instance-head-location instance))))
 
         (cond (context
                (setf env (tc:set-function env instance-codegen-sym (tc:make-function-env-entry
@@ -179,7 +238,8 @@
           (tc:overlapping-instance-error (e)
             (tc-error "Overlapping instance"
                       (tc-location (parser:toplevel-define-instance-head-location instance)
-                                   "instance overlaps with ~S" (tc:overlapping-instance-error-inst2 e)))))
+                                   "instance overlaps with ~A"
+                                   (type-object-string (tc:overlapping-instance-error-inst2 e) env)))))
 
         (loop :for method-name :in method-names
               :for method-codegen-sym :in method-codegen-syms :do
@@ -210,7 +270,7 @@
            (loop :with table := (make-hash-table :test #'eq)
                  :for method :in (tc:ty-class-unqualified-methods class)
                  :do (setf (gethash (tc:ty-class-method-name method) table)
-                           (tc:ty-class-method-type method))
+                           method)
                  :finally (return table))))
 
     ;; Check for superclasses and check the context of superinstances
@@ -227,7 +287,8 @@
                                 :no-error t)
                                (tc-error "Instance missing context"
                                          (tc-location (parser:toplevel-define-instance-head-location unparsed-instance)
-                                                      "No instance for ~S" superclass)))
+                                                      "No instance for ~A"
+                                                      (type-object-string superclass env))))
 
                       :for additional-context
                         := (tc:apply-substitution
@@ -240,9 +301,9 @@
                                 :do (unless (tc:entail env context pred)
                                       (tc-error "Instance missing context"
                                                 (tc-location (parser:toplevel-define-instance-head-location unparsed-instance)
-                                                             "No instance for ~S arising from constraints of superclasses ~S"
-                                                             pred
-                                                             superclass))))))
+                                                             "No instance for ~A arising from constraints of superclasses ~A"
+                                                             (type-object-string pred env)
+                                                             (type-object-string superclass env)))))))
 
     (check-duplicates
      (parser:toplevel-define-instance-methods unparsed-instance)
@@ -274,30 +335,72 @@
                           (tc-note unparsed-instance "The method ~S is not defined" name)))
 
     (let* ((methods (loop :with table := (make-hash-table :test #'eq)
+                          :with instance-scoped-tvars := (tc:type-variables (cons pred context))
 
                           :for method :in (parser:toplevel-define-instance-methods unparsed-instance)
                           :for name := (parser:node-variable-name (parser:instance-method-definition-name method))
 
-                          :for class-method-scheme := (gethash name method-table)
-                          :for class-method-qual-ty := (tc:fresh-inst class-method-scheme)
+                          :for class-method := (gethash name method-table)
+                          :for class-method-scheme := (tc:ty-class-method-type class-method)
+                          :for class-method-outer-tvars := (tc:ty-class-method-outer-tvars class-method)
+                          :for class-method-explicit-tvars := (tc:ty-class-method-explicit-tvars class-method)
+                          :for class-method-explicit-p := (tc:ty-scheme-explicit-p class-method-scheme)
+                          :for class-method-tvars := (and class-method-explicit-p
+                                                          class-method-explicit-tvars)
+                          :for class-method-qual-ty
+                            := (if class-method-explicit-p
+                                   (tc:instantiate class-method-tvars
+                                                   (tc:ty-scheme-type class-method-scheme))
+                                   (tc:fresh-inst class-method-scheme))
+                          :for scoped-method-tvars
+                            := (if class-method-explicit-p
+                                   (mapcar (lambda (tvar)
+                                             (tc:apply-substitution instance-subs tvar))
+                                           class-method-tvars)
+                                   nil)
+                          :for scoped-outer-method-tvars
+                            := (mapcar (lambda (tvar)
+                                         (tc:apply-substitution instance-subs tvar))
+                                       class-method-outer-tvars)
                           :for class-method-constraints := (tc:qualified-ty-predicates class-method-qual-ty)
                           :for class-method-ty := (tc:qualified-ty-type class-method-qual-ty)
 
                           ;; NOTE: Instance methods type still do not contain the class predicate
                           :for instance-method-context := (append context class-method-constraints)
                           :for instance-method-qual-ty
-                            := (tc:apply-substitution instance-subs (tc:qualify instance-method-context class-method-ty))
-                          :for instance-method-scheme := (tc:quantify
-                                                          (tc:type-variables instance-method-qual-ty)
-                                                          instance-method-qual-ty)
+                            := (let* ((qual-ty (tc:apply-substitution
+                                                instance-subs
+                                                (tc:qualify instance-method-context class-method-ty)))
+                                      (scoped-subs
+                                        (instance-scoped-method-substitutions
+                                         scoped-outer-method-tvars
+                                         instance-scoped-tvars)))
+                                 (tc:apply-substitution scoped-subs qual-ty))
+                          :for instance-method-scheme
+                            := (if class-method-explicit-p
+                                   (tc:quantify-using-tvar-order
+                                    scoped-method-tvars
+                                    instance-method-qual-ty
+                                    t)
+                                   (tc:quantify
+                                    (set-difference
+                                     (tc:type-variables instance-method-qual-ty)
+                                     instance-scoped-tvars
+                                     :test #'tc:ty=)
+                                    instance-method-qual-ty))
+                          :for instance-method-env
+                            := (tc-env-extend-type-variable-scope
+                                (make-tc-env :env env)
+                                (remove-duplicates
+                                 (append instance-scoped-tvars scoped-method-tvars)
+                                 :test #'tc:ty=))
 
                           :do (multiple-value-bind (preds method subs)
                                   (infer-expl-binding-type method
-                                                           instance-method-scheme
-                                                           (source:location method)
-                                                           nil
-                                                           (make-tc-env :env env))
-
+                                                          instance-method-scheme
+                                                          (source:location method)
+                                                          nil
+                                                          instance-method-env)
                                 ;; Deferred predicates should always be null
                                 (unless (null preds)
                                   (util:coalton-bug "Instance definition predicates should not be null."))
@@ -309,13 +412,40 @@
                                       :for node-pred :in (tc:qualified-ty-predicates
                                                           (node-type
                                                            (instance-method-definition-name method)))
-                                      :do (setf subs (tc:compose-substitution-lists
+                                      :do (let ((match-subs
+                                                  (handler-case
                                                       (tc:predicate-match node-pred context-pred instance-subs)
-                                                      subs)))
-
+                                                    (tc:coalton-internal-type-error (e)
+                                                      (error e)))))
+                                            (setf subs (tc:compose-substitution-lists
+                                                        match-subs
+                                                        subs))))
+                                (check-instance-predicate-not-narrowed method
+                                                                       pred
+                                                                       context
+                                                                       subs
+                                                                       env)
                                 (setf (gethash name table) (tc:apply-substitution subs method)))
 
-                          :finally (return table))))
+	                          :finally (return table))))
+
+      (check-bindings-for-invalid-recursion
+       (parser:toplevel-define-instance-methods unparsed-instance)
+       env
+       :binding-function-p
+       (lambda (binding)
+         (let ((typed-method
+                 (gethash (parser:node-variable-name (parser:binding-name binding))
+                          methods)))
+           (and typed-method
+                (or (instance-method-definition-function-syntax-p typed-method)
+                    (and (instance-method-definition-params typed-method) t)
+                    (and (null (node-body-nodes (instance-method-definition-body typed-method)))
+                         (node-abstraction-p
+                          (node-body-last-node (instance-method-definition-body typed-method))))
+                    (consp (tc:qualified-ty-predicates
+                            (node-type (instance-method-definition-name typed-method)))))
+                t))))
 
       (make-toplevel-define-instance
        :context context
@@ -331,8 +461,7 @@
   (when (parser:toplevel-define-instance-compiler-generated instance)
     (return-from check-instance-valid))
 
-  (let* ((types-package (util:find-package "COALTON-LIBRARY/TYPES"))
-
+  (let* ((types-package (util:find-package "COALTON/TYPES"))
          (runtime-repr (util:find-symbol "RUNTIMEREPR" types-package)))
 
     ;; Instance validation is disabled in the types package
@@ -340,8 +469,8 @@
       (return-from check-instance-valid))
 
     ;; Allow definition of LispArray and Complex instances of RuntimeRepr
-    (when (member *package* (list (find-package "COALTON-LIBRARY/LISPARRAY")
-                                  (find-package "COALTON-LIBRARY/MATH/COMPLEX")))
+    (when (member *package* (list (find-package "COALTON/LISPARRAY")
+                                  (find-package "COALTON/MATH/COMPLEX")))
       (let ((types (parser:ty-predicate-types (parser:toplevel-define-instance-pred instance))))
         (when (and (= 1 (length types))
                    (parser:tapp-p (first types))
@@ -360,30 +489,30 @@
            (values null))
 
   ;; Stage-1 packages skip the orphan instance check
-  (when (find *package* (list (find-package "COALTON-LIBRARY/TYPES")
-                              (find-package "COALTON-LIBRARY/FIXED-SIZE-NUMBERS")
-                              (find-package "COALTON-LIBRARY/CLASSES")
-                              (find-package "COALTON-LIBRARY/HASH")
-                              (find-package "COALTON-LIBRARY/BUILTIN")
-                              (find-package "COALTON-LIBRARY/FUNCTIONS")
-                              (find-package "COALTON-LIBRARY/BOOLEAN")
-                              (find-package "COALTON-LIBRARY/BITS")
-                              (find-package "COALTON-LIBRARY/MATH/ARITH")
-                              (find-package "COALTON-LIBRARY/MATH/NUM")
-                              (find-package "COALTON-LIBRARY/MATH/BOUNDED")
-                              (find-package "COALTON-LIBRARY/MATH/CONVERSIONS")
-                              (find-package "COALTON-LIBRARY/MATH/FRACTION")
-                              (find-package "COALTON-LIBRARY/MATH/INTEGRAL")
-                              (find-package "COALTON-LIBRARY/MATH/REAL")
-                              (find-package "COALTON-LIBRARY/MATH/COMPLEX")
-                              (find-package "COALTON-LIBRARY/MATH/ELEMENTARY")
-                              (find-package "COALTON-LIBRARY/MATH/DYADIC")
-                              (find-package "COALTON-LIBRARY/CHAR")
-                              (find-package "COALTON-LIBRARY/STRING")
-                              (find-package "COALTON-LIBRARY/TUPLE")
-                              (find-package "COALTON-LIBRARY/OPTIONAL")
-                              (find-package "COALTON-LIBRARY/LIST")
-                              (find-package "COALTON-LIBRARY/RESULT")))
+  (when (find *package* (list (find-package "COALTON/TYPES")
+                              (find-package "COALTON/FIXED-SIZE-NUMBERS")
+                              (find-package "COALTON/CLASSES")
+                              (find-package "COALTON/HASH")
+                              (find-package "COALTON/BUILTIN")
+                              (find-package "COALTON/FUNCTIONS")
+                              (find-package "COALTON/BOOLEAN")
+                              (find-package "COALTON/BITS")
+                              (find-package "COALTON/MATH/ARITH")
+                              (find-package "COALTON/MATH/NUM")
+                              (find-package "COALTON/MATH/BOUNDED")
+                              (find-package "COALTON/MATH/CONVERSIONS")
+                              (find-package "COALTON/MATH/FRACTION")
+                              (find-package "COALTON/MATH/INTEGRAL")
+                              (find-package "COALTON/MATH/REAL")
+                              (find-package "COALTON/MATH/COMPLEX")
+                              (find-package "COALTON/MATH/ELEMENTARY")
+                              (find-package "COALTON/MATH/DYADIC")
+                              (find-package "COALTON/CHAR")
+                              (find-package "COALTON/STRING")
+                              (find-package "COALTON/TUPLE")
+                              (find-package "COALTON/OPTIONAL")
+                              (find-package "COALTON/LIST")
+                              (find-package "COALTON/RESULT")))
     (return-from check-for-orphan-instance))
 
   (let ((instance-syms

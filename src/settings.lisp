@@ -18,6 +18,7 @@
    #:*print-specialization-occurrences* ; VARIABLE
    #:*print-inlining-occurrences*       ; VARIABLE
    #:*print-optimization-passes*        ; VARIABLE
+   #:*auto-continue-redefinition*       ; VARIABLE
    ))
 
 (in-package #:coalton-impl/settings)
@@ -49,10 +50,11 @@
       :print-unicode                    ; [boolean] print unicode?
       :type-printing-mode               ; [member :types :aliases :types-and-aliases] type printing mode
       :perform-specialization           ; [boolean] use specializations?
-      :perform-inlining                 ; [boolean] automatic inlining?
+      :perform-heuristic-inlining       ; [boolean] automatic inlining?
       :emit-type-annotations            ; [boolean] emit type annotations?
       :print-types                      ; [boolean] print types when compiling?
       :print-rewrites                   ; [boolean] print rewriting that occurs (specialization/inlining)?
+      :auto-continue-redefinition       ; [boolean] auto continue incompatible redefinitions?
       )
     "Valid configuration keys that can be (SETF GET) on the user configuration variable :COALTON-CONFIG.")
 
@@ -120,7 +122,7 @@ or by pushing `:coalton-release' into `*features*'. Any of these must be done be
            :test #'string-equal)
      t)
     (t
-     (config ':perform-inlining :default nil))))
+     (config ':perform-heuristic-inlining :default nil))))
 
 (declaim (type boolean *emit-type-annotations*))
 (defvar *emit-type-annotations* (config ':emit-type-annotations :default t)
@@ -142,6 +144,10 @@ or by pushing `:coalton-release' into `*features*'. Any of these must be done be
 (defvar *print-optimization-passes* (config ':print-rewrites :default nil)
   "Indicate when a node optimization pass is being performed.")
 
+(declaim (type boolean *auto-continue-redefinition*))
+(defvar *auto-continue-redefinition* (config ':auto-continue-redefinition :default nil)
+  "When non-NIL, automatically continue with incompatible redefinitions instead of raising an error.
+A warning will still be issued showing the affected functions.")
 
 (defvar *coalton-optimize* '(optimize (speed 3) (safety 0)))
 

@@ -14,10 +14,12 @@
    #:keyword-src                        ; STRUCT
    #:make-keyword-src                   ; CONSTRUCTOR
    #:keyword-src-name                   ; ACCESSOR
+   #:keyword-src-source-name            ; ACCESSOR
    #:keyword-src-list                   ; TYPE
    #:identifier-src                     ; STRUCT
    #:make-identifier-src                ; CONSTRUCTOR
    #:identifier-src-name                ; ACCESSOR
+   #:identifier-src-source-name         ; ACCESSOR
    #:identifier-src-list                ; TYPE
    #:parse-list                         ; FUNCTION
    #:parse-error
@@ -48,8 +50,11 @@
 
 (defstruct (keyword-src
             (:copier nil))
-  (name     (util:required 'name)     :type keyword :read-only t)
-  (location (util:required 'location) :type source:location :read-only t))
+  (name        (util:required 'name)      :type keyword           :read-only t)
+  ;; The original source spelling survives parser renaming and is reused for
+  ;; later printing of programmer-written type variables.
+  (source-name nil                        :type (or null keyword) :read-only t)
+  (location    (util:required 'location)  :type source:location   :read-only t))
 
 (defmethod source:location ((self keyword-src))
   (keyword-src-location self))
@@ -64,6 +69,7 @@
 (defstruct (identifier-src
             (:copier nil))
   (name     (util:required 'name)     :type identifier :read-only t)
+  (source-name nil                    :type (or null string) :read-only t)
   (location (util:required 'location) :type source:location :read-only t))
 
 (defmethod source:location ((self identifier-src))
@@ -101,7 +107,9 @@
 
 (defun parse-error (message &rest notes)
   "Signal PARSE-ERROR with provided MESSAGE and source NOTES."
-  (error 'parse-error :message message :notes notes))
+  (let ((condition (make-condition 'parse-error :message message :notes notes)))
+    (source:emit-source-diagnostic condition)
+    (cl:error condition)))
 
 (defun ensure-span (spanning)
   "Is SPANNING is a span, return it unchanged; if it is a cst node, return the node's span."
