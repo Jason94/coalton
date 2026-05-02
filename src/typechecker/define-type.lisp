@@ -34,7 +34,6 @@
    #:type-definition-list               ; TYPE
    ))
 
-(declaim (optimize (speed 0) (space 0) (debug 3)))
 ;;;;
 ;;;; Type Definition Processing
 ;;;;
@@ -597,7 +596,6 @@ This is conservative and intentionally aligns with mutable native wrappers."
          :for repr-arg
            := (and repr (eq repr-type :native) (cst:raw (parser:attribute-repr-arg repr)))
 
-
          :for constructor-args
            := (loop
                 :for ctor :in (parser:type-definition-ctors type)
@@ -611,35 +609,14 @@ This is conservative and intentionally aligns with mutable native wrappers."
 
          :for constructor-types
            := (loop
-                :for ctor
-                  :in (parser:type-definition-ctors type)
-                :for ctor-name
-                  := (parser:identifier-src-name (parser:type-definition-ctor-name ctor))
-                :for stored-scheme
-                  := (gethash ctor-name ctor-scheme-table)
-                :collect
-                  (if stored-scheme
-                      ;; GADTs resolve the supplied function type
-                      (let* ((qual-ty (tc:apply-ksubstitution ksubs stored-scheme))
-                             (vars-in-qual (tc:type-variables qual-ty))
-                             (extras (set-difference vars-in-qual tvars :test #'equalp))
-                             (ordered (append tvars extras)))
-                        (tc:quantify ordered qual-ty))
-                      ;; ADTs construct a function type from their fields
-                      (let ((ty (tc:make-function-type*
-                                 (tc:apply-ksubstitution ksubs (gethash ctor-name ctor-table))
-                                 (tc:apply-type-argument-list
-                                  (tc:apply-ksubstitution ksubs (gethash name (partial-type-env-ty-table env)))
-                                  tvars))))
-                        (tc:quantify-using-tvar-order tvars (tc:qualify nil ty)))))
-
-         :for constructor-args
-           := (loop
-                :for ctor
-                  :in (parser:type-definition-ctors type)
-                :for ctor-name
-                  := (parser:identifier-src-name (parser:type-definition-ctor-name ctor))
-                :collect (tc:apply-ksubstitution ksubs (gethash ctor-name ctor-table)))
+                :for ctor-args :in constructor-args
+                :for ty
+                  := (tc:prepend-function-input-types
+                      ctor-args
+                      (tc:apply-type-argument-list
+                       (tc:apply-ksubstitution ksubs (gethash name (partial-type-env-ty-table env)))
+                       tvars))
+                :collect (tc:quantify-using-tvar-order tvars (tc:qualify nil ty)))
 
          ;; Check that repr :enum types do not have any constructors with fields
          :when (eq repr-type :enum)

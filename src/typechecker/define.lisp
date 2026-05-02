@@ -2068,9 +2068,9 @@ Returns (VALUES INFERRED-TYPE PREDICATES NODE SUBSTITUTIONS)")
                        (tc-error "Invalid values binding pattern"
                                  (tc-note subpattern
                                           "`values` bindings only support variables and `_`")))
-                     (multiple-value-bind (_sub-ty sub-node subs_)
+                     (multiple-value-bind (_sub-ty preds_ sub-node subs_)
                          (infer-pattern-type subpattern component-type subs env)
-                       (declare (ignore _sub-ty))
+                       (declare (ignore _sub-ty preds_))
                        (setf subs subs_)
                        (push sub-node pattern-nodes)))
             (setf pattern-nodes (nreverse pattern-nodes))
