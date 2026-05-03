@@ -599,24 +599,48 @@ This is conservative and intentionally aligns with mutable native wrappers."
          :for constructor-args
            := (loop
                 :for ctor :in (parser:type-definition-ctors type)
+                :for ctor-name := (parser:identifier-src-name
+                                   (parser:type-definition-ctor-name ctor))
+                :for stored-scheme := (gethash ctor-name ctor-scheme-table)
                 :collect
-                (loop :for parser-field-type
-                        :in (parser:type-definition-ctor-field-types ctor)
-                      :collect (multiple-value-bind (field-type ignored-ksubs)
-                                   (parse-type parser-field-type alias-partial-env ksubs)
-                                 (declare (ignore ignored-ksubs))
-                                 field-type)))
+                (if stored-scheme
+                    ;; GADT constructor: arguments come from the expilict signature
+                    (tc:function-type-arguments
+                     (tc:apply-ksubstitution ksubs stored-scheme))
+
+                    ;; ADT constructor: arguments come from fiedl syntax
+                    (loop :for parser-field-type
+                            :in (parser:type-definition-ctor-field-types ctor)
+                          :collect (multiple-value-bind (field-type ignored-ksubs)
+                                       (parse-type parser-field-type alias-partial-env ksubs)
+                                     (declare (ignore ignored-ksubs))
+                                     field-type))))
 
          :for constructor-types
            := (loop
+                :for ctor :in (parser:type-definition-ctors type)
                 :for ctor-args :in constructor-args
-                :for ty
-                  := (tc:prepend-function-input-types
-                      ctor-args
-                      (tc:apply-type-argument-list
-                       (tc:apply-ksubstitution ksubs (gethash name (partial-type-env-ty-table env)))
-                       tvars))
-                :collect (tc:quantify-using-tvar-order tvars (tc:qualify nil ty)))
+                :for ctor-name := (parser:identifier-src-name
+                                   (parser:type-definition-ctor-name ctor))
+                :for stored-scheme := (gethash ctor-name ctor-scheme-table)
+                :collect
+                (if stored-scheme
+                    ;; GADT constructor: use the explicit constructor type
+                    (let* ((qual-ty (tc:apply-ksubstitution ksubs stored-scheme))
+                           (vars-in-qual (tc:type-variables qual-ty))
+                           (ordered-vars (append tvars
+                                                 (set-difference vars-in-qual
+                                                                 tvars
+                                                                 :test #'tc:ty=))))
+                      (tc:quantify-using-tvar-order ordered-vars qual-ty))
+
+                    ;; ADT constructor
+                    (let ((ty (tc:prepend-function-input-types
+                               ctor-args
+                               (tc:apply-type-argument-list
+                                (tc:apply-ksubstitution ksubs (gethash name (partial-type-env-ty-table env)))
+                                tvars))))
+                      (tc:quantify-using-tvar-order tvars (tc:qualify nil ty)))))
 
          ;; Check that repr :enum types do not have any constructors with fields
          :when (eq repr-type :enum)
