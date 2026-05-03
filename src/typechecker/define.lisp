@@ -2437,7 +2437,21 @@ Returns (VALUES INFERRED-TYPE PREDICATES NODE SUBSTITUTIONS)")
                         (intersection (tc:type-variables (tc:substitution-to sub))
                                       protected-vars
                                       :test #'tc:ty=)))
-                  subs)))
+                  subs))
+
+               (merge-gadt-branch-delta (subs delta)
+                 (dolist (sub delta subs)
+                   (let* ((from (tc:substitution-from sub))
+                          (to (tc:substitution-to sub))
+                          (existing (find from subs
+                                          :key #'tc:substitution-from
+                                          :test #'tc:ty=)))
+                     (if existing
+                         (setf subs
+                               (tc:unify subs
+                                         (tc:substitution-to existing)
+                                         to))
+                         (push sub subs))))))
 
         (let* (;; Infer the type of each pattern, unifying against expr-ty, specialized for
                ;; any branch-specific refinements from a GADT constructor.
@@ -2585,6 +2599,8 @@ Returns (VALUES INFERRED-TYPE PREDICATES NODE SUBSTITUTIONS)")
                    (dolist (branch-body-dat branch-body-data)
                      (format *error-output* "~&GADTMERGE merge current=~{~A~^, ~} incoming=~{~A~^, ~}~%" (mapcar (lambda (s) (format nil "~A=>~A" (type-object-string (tc:substitution-from s)) (type-object-string (tc:substitution-to s)))) subs) (mapcar (lambda (s) (format nil "~A=>~A" (type-object-string (tc:substitution-from s)) (type-object-string (tc:substitution-to s)))) (getf branch-body-dat :branch-delta)))
                      (format *error-output* "~&GADTPROVE merge-test ok=~S current=~{~A~^, ~} incoming=~{~A~^, ~}~%" (handler-case (progn (tc:merge-substitution-lists subs (getf branch-body-dat :branch-delta)) t) (tc:coalton-internal-type-error () nil)) (mapcar (lambda (s) (format nil "~A=>~A" (type-object-string (tc:substitution-from s)) (type-object-string (tc:substitution-to s)))) subs) (mapcar (lambda (s) (format nil "~A=>~A" (type-object-string (tc:substitution-from s)) (type-object-string (tc:substitution-to s)))) (getf branch-body-dat :branch-delta)))
+                     (format *error-output* "~&GADTUNIFY overlaps=~{~A~^ | ~}~%" (loop :for incoming :in (getf branch-body-dat :branch-delta) :for existing := (find (tc:substitution-from incoming) subs :key #'tc:substitution-from :test #'tc:ty=) :when existing :collect (format nil "~A#~D existing=~A incoming=~A unify-ok=~S" (type-object-string (tc:substitution-from incoming)) (tc:tyvar-id (tc:substitution-from incoming)) (type-object-string (tc:substitution-to existing)) (type-object-string (tc:substitution-to incoming)) (handler-case (progn (tc:unify subs (tc:substitution-to existing) (tc:substitution-to incoming)) t) (tc:coalton-internal-type-error () nil)))))
+                     (format *error-output* "~&GADTUNIFY result=~{~A~^, ~}~%" (loop :for incoming :in (getf branch-body-dat :branch-delta) :for existing := (find (tc:substitution-from incoming) subs :key #'tc:substitution-from :test #'tc:ty=) :when existing :append (mapcar (lambda (s) (format nil "~A#~D=>~A" (type-object-string (tc:substitution-from s)) (tc:tyvar-id (tc:substitution-from s)) (type-object-string (tc:substitution-to s)))) (handler-case (tc:unify subs (tc:substitution-to existing) (tc:substitution-to incoming)) (tc:coalton-internal-type-error () nil)))))
                      (let* ((visible-vars
                               (remove-duplicates
                                (append
@@ -2611,8 +2627,9 @@ Returns (VALUES INFERRED-TYPE PREDICATES NODE SUBSTITUTIONS)")
                                           (tc:tyvar-id (tc:substitution-from s))
                                           (type-object-string (tc:substitution-to s))))
                                 proposed-incoming)))
+                     (format *error-output* "~&GADTUNIFY full-merge-ok=~S~%" (handler-case (progn (let ((test-subs subs)) (dolist (incoming (getf branch-body-dat :branch-delta)) (let ((existing (find (tc:substitution-from incoming) test-subs :key #'tc:substitution-from :test #'tc:ty=))) (setf test-subs (if existing (tc:unify test-subs (tc:substitution-to existing) (tc:substitution-to incoming)) (cons incoming test-subs)))))) t) (tc:coalton-internal-type-error () nil)))
                      (setf subs
-                           (tc:merge-substitution-lists
+                           (merge-gadt-branch-delta
                             subs
                             (getf branch-body-dat :branch-delta))))))
 
