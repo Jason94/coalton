@@ -2439,6 +2439,48 @@ Returns (VALUES INFERRED-TYPE PREDICATES NODE SUBSTITUTIONS)")
                                       :test #'tc:ty=)))
                   subs))
 
+               (result-sub-for-var (var branch-delta)
+                 (find var
+                       branch-delta
+                       :key #'tc:substitution-from
+                       :test #'tc:ty=))
+
+               (result-sub-tracks-protected-index-p (var branch-dat branch-body-dat protected-vars)
+                 (let ((result-sub (result-sub-for-var var (getf branch-body-dat :branch-delta))))
+                   (and result-sub
+                        (some (lambda (pattern-sub)
+                                (and
+                                 ;; The pattern sub must be for a protected scrutinee/index var
+                                 (find (tc:substitution-from pattern-sub)
+                                       protected-vars
+                                       :test #'tc:ty=)
+
+                                 ;; The result sub must refine to the same branch-specific type
+                                 (tc:ty= (tc:substitution-to result-sub)
+                                         (tc:substitution-to pattern-sub))))
+                              (getf branch-dat :branch-subs)))))
+
+               (index-tracking-result-vars (branch-data branch-body-data expected-type protected-vars)
+                 (remove-if-not
+                  (lambda (var)
+                    (every #'identity
+                           (loop :for branch-dat :in branch-data
+                                 :for branch-body-dat :in branch-body-data
+                                 :collect (result-sub-tracks-protected-index-p
+                                           var
+                                           branch-dat
+                                           branch-body-dat
+                                           protected-vars))))
+                  (tc:type-variables expected-type)))
+
+               (drop-index-tracking-result-subs (branch-delta index-tracking-vars)
+                 (remove-if
+                  (lambda (sub)
+                    (find (tc:substitution-from sub)
+                          index-tracking-vars
+                          :test #'tc:ty=))
+                  branch-delta))
+
                (merge-gadt-branch-delta (subs delta)
                  (dolist (sub delta subs)
                    (let* ((from (tc:substitution-from sub))
@@ -2465,7 +2507,6 @@ Returns (VALUES INFERRED-TYPE PREDICATES NODE SUBSTITUTIONS)")
                        :collect (multiple-value-bind (pat-ty preds_ pat-node subs_)
                                     (infer-pattern-type pattern expr-ty subs branch-env)
                                   (declare (ignore pat-ty))
-                                  (format *error-output* "~&GADTMERGE pattern loc=~S gadt=~S expr=~A pat=~A branch-subs=~{~A~^, ~}~%" (source:location pattern) (pattern-contains-gadt-p pattern) (type-object-string (tc:apply-substitution subs_ expr-ty)) (type-object-string (tc:apply-substitution subs_ pat-ty)) (mapcar (lambda (s) (format nil "~A=>~A" (type-object-string (tc:substitution-from s)) (type-object-string (tc:substitution-to s)))) (delta-subs subs_ match-base-subs)))
                                   (list :pat-node pat-node
                                         :branch-subs (delta-subs
                                                       subs_
@@ -2490,20 +2531,6 @@ Returns (VALUES INFERRED-TYPE PREDICATES NODE SUBSTITUTIONS)")
                         (tc:type-variables
                          (tc:apply-substitution match-base-subs expr-ty)))
                        :test #'tc:ty=)))
-
-               (_dbg-match (format *error-output* "~&GADTMERGE match loc=~S gadt=~S expected=~A expr=~A protected=~{~A~^, ~} base-subs=~{~A~^, ~}~%" (source:location node) match-gadt-p (type-object-string expected-type) (type-object-string (tc:apply-substitution match-base-subs expr-ty)) (mapcar #'type-object-string protected-vars) (mapcar (lambda (s) (format nil "~A=>~A" (type-object-string (tc:substitution-from s)) (type-object-string (tc:substitution-to s)))) match-base-subs)))
-               (_dbg-visible-vars
-                 (format *error-output*
-                         "~&GADTVISIBLE vars=~{~A~^, ~}~%"
-                         (mapcar
-                          (lambda (v)
-                            (format nil "~A#~D" (type-object-string v) (tc:tyvar-id v)))
-                          (remove-duplicates
-                           (append
-                            (tc:type-variables expected-type)
-                            (loop :for scheme :being :the :hash-values :of (tc-env-ty-table env)
-                                  :append (tc:type-variables scheme)))
-                           :test #'tc:ty=))))
 
                (ret-ty (tc:make-variable :kind tc:+kstar+ :allow-result-p t))
 
@@ -2530,30 +2557,6 @@ Returns (VALUES INFERRED-TYPE PREDICATES NODE SUBSTITUTIONS)")
                            :collect (multiple-value-bind (body-ty preds_ accessors_ body-node subs_)
                                         (infer-expression-type body branch-ret-ty subs-for-branch-body branch-env)
                                       (declare (ignore body-ty))
-                                      (format *error-output* "~&GADTPROVE delta loc=~S input=~{~A~^, ~} raw=~{~A~^, ~} raw-delta=~{~A~^, ~}~%" (source:location (parser:node-body-last-node body)) (mapcar (lambda (s) (format nil "~A=>~A" (type-object-string (tc:substitution-from s)) (type-object-string (tc:substitution-to s)))) subs-for-branch-body) (mapcar (lambda (s) (format nil "~A=>~A" (type-object-string (tc:substitution-from s)) (type-object-string (tc:substitution-to s)))) subs_) (mapcar (lambda (s) (format nil "~A=>~A" (type-object-string (tc:substitution-from s)) (type-object-string (tc:substitution-to s)))) (delta-subs subs_ subs-for-branch-body)))
-                                      (format *error-output* "~&GADTPROVE protected loc=~S protected=~{~A~^, ~} classified=~{~A~^ | ~}~%" (source:location (parser:node-body-last-node body)) (mapcar (lambda (v) (format nil "~A#~D" (type-object-string v) (tc:tyvar-id v))) protected-vars) (mapcar (lambda (s) (format nil "~A=>~A from-protected=~S rhs-protected=~S" (type-object-string (tc:substitution-from s)) (type-object-string (tc:substitution-to s)) (find (tc:substitution-from s) protected-vars :test #'tc:ty=) (intersection (tc:type-variables (tc:substitution-to s)) protected-vars :test #'tc:ty=))) (delta-subs subs_ subs-for-branch-body)))
-                                      (format *error-output*
-                                              "~&GADTVISIBLE classify loc=~S entries=~{~A~^ | ~}~%"
-                                              (source:location (parser:node-body-last-node body))
-                                              (let ((visible-vars
-                                                      (remove-duplicates
-                                                       (append
-                                                        (tc:type-variables expected-type)
-                                                        (loop :for scheme :being :the :hash-values :of (tc-env-ty-table env)
-                                                              :append (tc:type-variables scheme)))
-                                                       :test #'tc:ty=)))
-                                                (mapcar
-                                                 (lambda (s)
-                                                   (format nil "~A#~D=>~A visible=~S protected=~S"
-                                                           (type-object-string (tc:substitution-from s))
-                                                           (tc:tyvar-id (tc:substitution-from s))
-                                                           (type-object-string (tc:substitution-to s))
-                                                           (find (tc:substitution-from s) visible-vars :test #'tc:ty=)
-                                                           (or (find (tc:substitution-from s) protected-vars :test #'tc:ty=)
-                                                               (intersection (tc:type-variables (tc:substitution-to s))
-                                                                             protected-vars
-                                                                             :test #'tc:ty=))))
-                                                 (delta-subs subs_ subs-for-branch-body))))
                                       (let* ((body-delta
                                                (delta-subs subs_ subs-for-branch-body))
                                              (branch-delta
@@ -2591,16 +2594,19 @@ Returns (VALUES INFERRED-TYPE PREDICATES NODE SUBSTITUTIONS)")
                                       (list :body-node body-node
                                             :branch-delta nil)))))
 
+               (index-tracking-result-vars (and match-gadt-p
+                                                (index-tracking-result-vars
+                                                 branch-data
+                                                 branch-body-data
+                                                 expected-type
+                                                 protected-vars)))
+
                ;; GADT branches were checked independently. Merge only the non-protected
                ;; subs learned by each branch. If ordinary outer variables disagree
                ;; across branches, this merge will fail.
                (_merge-gadt-branch-deltas
                  (when match-gadt-p
                    (dolist (branch-body-dat branch-body-data)
-                     (format *error-output* "~&GADTMERGE merge current=~{~A~^, ~} incoming=~{~A~^, ~}~%" (mapcar (lambda (s) (format nil "~A=>~A" (type-object-string (tc:substitution-from s)) (type-object-string (tc:substitution-to s)))) subs) (mapcar (lambda (s) (format nil "~A=>~A" (type-object-string (tc:substitution-from s)) (type-object-string (tc:substitution-to s)))) (getf branch-body-dat :branch-delta)))
-                     (format *error-output* "~&GADTPROVE merge-test ok=~S current=~{~A~^, ~} incoming=~{~A~^, ~}~%" (handler-case (progn (tc:merge-substitution-lists subs (getf branch-body-dat :branch-delta)) t) (tc:coalton-internal-type-error () nil)) (mapcar (lambda (s) (format nil "~A=>~A" (type-object-string (tc:substitution-from s)) (type-object-string (tc:substitution-to s)))) subs) (mapcar (lambda (s) (format nil "~A=>~A" (type-object-string (tc:substitution-from s)) (type-object-string (tc:substitution-to s)))) (getf branch-body-dat :branch-delta)))
-                     (format *error-output* "~&GADTUNIFY overlaps=~{~A~^ | ~}~%" (loop :for incoming :in (getf branch-body-dat :branch-delta) :for existing := (find (tc:substitution-from incoming) subs :key #'tc:substitution-from :test #'tc:ty=) :when existing :collect (format nil "~A#~D existing=~A incoming=~A unify-ok=~S" (type-object-string (tc:substitution-from incoming)) (tc:tyvar-id (tc:substitution-from incoming)) (type-object-string (tc:substitution-to existing)) (type-object-string (tc:substitution-to incoming)) (handler-case (progn (tc:unify subs (tc:substitution-to existing) (tc:substitution-to incoming)) t) (tc:coalton-internal-type-error () nil)))))
-                     (format *error-output* "~&GADTUNIFY result=~{~A~^, ~}~%" (loop :for incoming :in (getf branch-body-dat :branch-delta) :for existing := (find (tc:substitution-from incoming) subs :key #'tc:substitution-from :test #'tc:ty=) :when existing :append (mapcar (lambda (s) (format nil "~A#~D=>~A" (type-object-string (tc:substitution-from s)) (tc:tyvar-id (tc:substitution-from s)) (type-object-string (tc:substitution-to s)))) (handler-case (tc:unify subs (tc:substitution-to existing) (tc:substitution-to incoming)) (tc:coalton-internal-type-error () nil)))))
                      (let* ((visible-vars
                               (remove-duplicates
                                (append
@@ -2612,26 +2618,13 @@ Returns (VALUES INFERRED-TYPE PREDICATES NODE SUBSTITUTIONS)")
                               (remove-if-not
                                (lambda (sub)
                                  (find (tc:substitution-from sub) visible-vars :test #'tc:ty=))
-                               (getf branch-body-dat :branch-delta))))
-                       (format *error-output*
-                               "~&GADTVISIBLE merge-test ok=~S proposed-incoming=~{~A~^, ~}~%"
-                               (handler-case
-                                   (progn
-                                     (tc:merge-substitution-lists subs proposed-incoming)
-                                     t)
-                                 (tc:coalton-internal-type-error () nil))
-                               (mapcar
-                                (lambda (s)
-                                  (format nil "~A#~D=>~A"
-                                          (type-object-string (tc:substitution-from s))
-                                          (tc:tyvar-id (tc:substitution-from s))
-                                          (type-object-string (tc:substitution-to s))))
-                                proposed-incoming)))
-                     (format *error-output* "~&GADTUNIFY full-merge-ok=~S~%" (handler-case (progn (let ((test-subs subs)) (dolist (incoming (getf branch-body-dat :branch-delta)) (let ((existing (find (tc:substitution-from incoming) test-subs :key #'tc:substitution-from :test #'tc:ty=))) (setf test-subs (if existing (tc:unify test-subs (tc:substitution-to existing) (tc:substitution-to incoming)) (cons incoming test-subs)))))) t) (tc:coalton-internal-type-error () nil)))
+                               (getf branch-body-dat :branch-delta)))))
                      (setf subs
                            (merge-gadt-branch-delta
                             subs
-                            (getf branch-body-dat :branch-delta))))))
+                            (drop-index-tracking-result-subs
+                             (getf branch-body-dat :branch-delta)
+                             index-tracking-result-vars))))))
 
                (branch-body-nodes (mapcar (lambda (branch-body-dat)
                                             (getf branch-body-dat :body-node))
