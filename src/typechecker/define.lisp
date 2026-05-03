@@ -2389,65 +2389,53 @@ Returns (VALUES INFERRED-TYPE PREDICATES NODE SUBSTITUTIONS)")
                                subs
                                env)
 
-      (flet (;; Determine if the pattern contains a GADT constructor. Needs to recursively walk
-             ;; all constructors in the pattern.
-             (pattern-contains-gadt-p (pattern)
-               (labels ((walk (pat)
-                          (typecase pat
-                            (parser:pattern-constructor
-                             (let ((ctor (tc:lookup-constructor
-                                          (tc-env-env env)
-                                          (parser:pattern-constructor-name pat)
-                                          :no-error t)))
-                               (or (and ctor
-                                        (tc:constructor-entry-gadt-p ctor))
-                                   (some #'walk
-                                         (parser:pattern-constructor-patterns pat)))))
-                            (parser:pattern-binding
-                             (or (walk (parser:pattern-binding-pattern pat))
-                                 (walk (parser:pattern-binding-var pat))))
-                            (t
-                             nil))))
-                 (walk pattern)))
+      (labels (;; Determine if the pattern contains a GADT constructor. Needs to recursively walk
+               ;; all constructors in the pattern.
+               (pattern-contains-gadt-p (pattern)
+                 (labels ((walk (pat)
+                            (typecase pat
+                              (parser:pattern-constructor
+                               (let ((ctor (tc:lookup-constructor
+                                            (tc-env-env env)
+                                            (parser:pattern-constructor-name pat)
+                                            :no-error t)))
+                                 (or (and ctor
+                                          (tc:constructor-entry-gadt-p ctor))
+                                     (some #'walk
+                                           (parser:pattern-constructor-patterns pat)))))
+                              (parser:pattern-binding
+                               (walk (parser:pattern-binding-pattern pat)))
+                              (t
+                               nil))))
+                   (walk pattern)))
 
-             ;; Remove substitutions that depend on this branch's pattern refinements.
-             (remove-branch-local-subs (all-subs branch-subs)
-                 (let ((branch-vars (loop :for sub :in branch-subs
-                                          :collect (tc:substitution-from sub))))
-                   ;; Expand branch-vars until it includes every subs whose RHS mentions a pattern or
-                   ;; branch-local var.
-                   (loop :with changed := t
-                         :while changed
-                         :do (progn
-                               (setf changed nil)
-                               (dolist (sub all-subs)
-                                 (let ((from (tc:substitution-from sub))
-                                       (to-vars (tc:type-variables (tc:substitution-to sub))))
-                                   (when (and (not (find from branch-vars :test #'tc:ty=))
-                                              (intersection to-vars branch-vars :test #'tc:ty=))
-                                     (push from branch-vars)
-                                     (setf changed t))))))
-                   ;; Remove every substitution whose LHS is branch-local.
-                   (remove-if
-                    (lambda (sub)
-                      (find (tc:substitution-from sub)
-                            branch-vars
-                            :test #'tc:ty=))
-                    all-subs)))
+               (same-substitution-p (a b)
+                 (and (tc:ty= (tc:substitution-from a)
+                              (tc:substitution-from b))
+                      (tc:ty= (tc:substitution-to a)
+                              (tc:substitution-to b))))
 
-             ;; After checking this branch pattern, which substitutions were learned specifically
-             ;; from this branch?
-             (branch-only-subs (after before)
+               ;; After checking tihs branch pattern/body, which subs were learned after BEFORE
+               (delta-subs (after before)
                  (remove-if
                   (lambda (sub)
                     (find sub
                           before
-                          :test (lambda (a b)
-                                  (and (tc:ty= (tc:substitution-from a)
-                                               (tc:substitution-from b))
-                                       (tc:ty= (tc:substitution-to a)
-                                               (tc:substitution-to b))))))
-                  after)))
+                          :test #'same-substitution-p))
+                  after))
+
+               ;; Remove subs whose from side is one of the protected scrutinee vars or whose
+               ;; right hand side still mentions one.
+               (remove-protected-subs (subs protected-vars)
+                 (remove-if
+                  (lambda (sub)
+                    (or (find (tc:substitution-from sub)
+                              protected-vars
+                              :test #'tc:ty=)
+                        (intersection (tc:type-variables (tc:substitution-to sub))
+                                      protected-vars
+                                      :test #'tc:ty=)))
+                  subs)))
 
         (let* (;; Infer the type of each pattern, unifying against expr-ty, specialized for
                ;; any branch-specific refinements from a GADT constructor.
@@ -2461,9 +2449,8 @@ Returns (VALUES INFERRED-TYPE PREDICATES NODE SUBSTITUTIONS)")
                        :collect (multiple-value-bind (pat-ty preds_ pat-node subs_)
                                     (infer-pattern-type pattern expr-ty subs branch-env)
                                   (declare (ignore pat-ty))
-                                  (format *error-output* "~&GADTDBG pattern loc=~S gadt=~S expr=~A pat=~A branch-subs=~{~A~^, ~}~%" (source:location pattern) (pattern-contains-gadt-p pattern) (type-object-string (tc:apply-substitution subs_ expr-ty)) (type-object-string (tc:apply-substitution subs_ pat-ty)) (mapcar (lambda (s) (format nil "~A=>~A" (type-object-string (tc:substitution-from s)) (type-object-string (tc:substitution-to s)))) (branch-only-subs subs_ match-base-subs)))
                                   (list :pat-node pat-node
-                                        :branch-subs (branch-only-subs
+                                        :branch-subs (delta-subs
                                                       subs_
                                                       match-base-subs)
                                         :pat-preds preds_
@@ -2475,41 +2462,90 @@ Returns (VALUES INFERRED-TYPE PREDICATES NODE SUBSTITUTIONS)")
                          (getf branch-dat :gadt-p))
                        branch-data))
 
+               ;; These are the tvars from the scrutinee type. For a match on a GADT
+               ;; (Box :a), :a is protected. Each GADT branch may refine it differently.
+               (protected-vars
+                 (and match-gadt-p
+                      (tc:type-variables
+                       (tc:apply-substitution match-base-subs expr-ty))))
+
                (ret-ty (tc:make-variable :kind tc:+kstar+ :allow-result-p t))
 
-               ;; Infer the type of each branch, unifying against ret-ty
-               (branch-body-nodes
-                 (loop :for branch :in (parser:node-match-branches node)
-                       :for branch-dat :in branch-data
-                       :for branch-subs := (getf branch-dat :branch-subs)
-                       :for subs-for-branch-body := (tc:compose-substitution-lists branch-subs subs)
-                       :for pat-preds := (tc:apply-substitution subs-for-branch-body (getf branch-dat :pat-preds))
-                       :for branch-ret-ty := (tc:apply-substitution subs-for-branch-body (if match-gadt-p
-                                                                                             expected-type
-                                                                                             ret-ty))
-                       :for branch-table := (getf branch-dat :pat-env-ty-table)
-                       :for branch-env := (make-tc-env :env (tc-env-env env)
-                                                       :ty-table branch-table)
-                       :for body := (parser:node-match-branch-body branch)
-                       :do (maphash (lambda (name scheme)
-                                      (setf (gethash name branch-table)
-                                            (tc:apply-substitution subs-for-branch-body scheme)))
-                                    branch-table)
-                       :do (format *error-output* "~&GADTRET enter loc=~S gadt=~S expected/view=~A ret/global=~A ret/branch=~A body-input-subs=~{~A~^, ~}~%" (source:location (parser:node-body-last-node body)) (getf branch-dat :gadt-p) (type-object-string (tc:apply-substitution subs-for-branch-body expected-type)) (type-object-string (tc:apply-substitution subs ret-ty)) (type-object-string branch-ret-ty) (mapcar (lambda (s) (format nil "~A=>~A" (type-object-string (tc:substitution-from s)) (type-object-string (tc:substitution-to s)))) subs-for-branch-body))
-                       :collect (multiple-value-bind (body-ty preds_ accessors_ body-node subs_)
-                                    (infer-expression-type body branch-ret-ty subs-for-branch-body branch-env)
-                                  (declare (ignore body-ty))
-                                  (format *error-output* "~&GADTDBG body loc=~S gadt=~S body-ty=~A branch-subs=~{~A~^, ~} clean-subs=~{~A~^, ~}~%" (source:location (parser:node-body-last-node body)) (getf branch-dat :gadt-p) (type-object-string (tc:apply-substitution subs_ body-ty)) (mapcar (lambda (s) (format nil "~A=>~A" (type-object-string (tc:substitution-from s)) (type-object-string (tc:substitution-to s)))) branch-subs) (mapcar (lambda (s) (format nil "~A=>~A" (type-object-string (tc:substitution-from s)) (type-object-string (tc:substitution-to s)))) (remove-branch-local-subs subs_ branch-subs)))
-                                  (format *error-output* "~&GADTRET raw-exit loc=~S body=~A ret/raw=~A ret/clean=~A~%" (source:location (parser:node-body-last-node body)) (type-object-string (tc:apply-substitution subs_ body-ty)) (type-object-string (tc:apply-substitution subs_ ret-ty)) (type-object-string (tc:apply-substitution (remove-branch-local-subs subs_ branch-subs) ret-ty)))
-                                  (setf subs (if (getf branch-dat :gadt-p)
-                                                 (remove-branch-local-subs subs_ branch-subs)
-                                                 subs_))
-                                  (format *error-output* "~&GADTRET shared-after loc=~S ret/shared=~A expected/shared=~A shared-subs=~{~A~^, ~}~%" (source:location (parser:node-body-last-node body)) (type-object-string (tc:apply-substitution subs ret-ty)) (type-object-string (tc:apply-substitution subs expected-type)) (mapcar (lambda (s) (format nil "~A=>~A" (type-object-string (tc:substitution-from s)) (type-object-string (tc:substitution-to s)))) subs))
-                                  (setf preds (append preds
-                                                      pat-preds
-                                                      (tc:apply-substitution subs_ preds_)))
-                                  (setf accessors (append accessors accessors_))
-                                  body-node)))
+               (branch-body-data
+                 (if match-gadt-p
+                     ;; GADT matches: check each branch independently from match-base-subs.
+                     ;; Do not commit one branch's substitutions before checking the next branch.
+                     (loop :for branch :in (parser:node-match-branches node)
+                           :for branch-dat :in branch-data
+                           :for branch-subs := (getf branch-dat :branch-subs)
+                           :for subs-for-branch-body := (tc:compose-substitution-lists branch-subs match-base-subs)
+                           :for pat-preds := (tc:apply-substitution subs-for-branch-body (getf branch-dat :pat-preds))
+                           :for branch-ret-ty := (tc:apply-substitution subs-for-branch-body expected-type)
+                           :for branch-table := (getf branch-dat :pat-env-ty-table)
+                           :for branch-env := (make-tc-env :env (tc-env-env env) :ty-table branch-table)
+                           :for body := (parser:node-match-branch-body branch)
+
+                           ;; Update pattern bound tvars and other branch-local names with this
+                           ;; branch's refinements before checking the body.
+                           :do (maphash (lambda (name scheme)
+                                          (setf (gethash name branch-table)
+                                                (tc:apply-substitution subs-for-branch-body scheme)))
+                                        branch-table)
+                           :collect (multiple-value-bind (body-ty preds_ accessors_ body-node subs_)
+                                        (infer-expression-type body branch-ret-ty subs-for-branch-body branch-env)
+                                      (declare (ignore body-ty))
+                                      (let* ((clean-subs
+                                               (remove-protected-subs subs_ protected-vars))
+                                             (branch-delta
+                                               (delta-subs clean-subs match-base-subs)))
+                                        (setf preds (append preds
+                                                            pat-preds
+                                                            (tc:apply-substitution subs_ preds_)))
+                                        (setf accessors (append accessors accessors_))
+                                        (list :body-node body-node
+                                              :branch-delta branch-delta))))
+
+                     ;; Plain ADT matches
+                     (loop :for branch :in (parser:node-match-branches node)
+                           :for branch-dat :in branch-data
+                           :for branch-subs := (getf branch-dat :branch-subs)
+                           :for subs-for-branch-body := (tc:compose-substitution-lists branch-subs subs)
+                           :for pat-preds := (tc:apply-substitution subs-for-branch-body (getf branch-dat :pat-preds))
+                           :for branch-ret-ty := (tc:apply-substitution subs-for-branch-body ret-ty)
+                           :for branch-table := (getf branch-dat :pat-env-ty-table)
+                           :for branch-env := (make-tc-env :env (tc-env-env env)
+                                                           :ty-table branch-table)
+                           :for body := (parser:node-match-branch-body branch)
+                           :do (maphash (lambda (name scheme)
+                                          (setf (gethash name branch-table)
+                                                (tc:apply-substitution subs-for-branch-body scheme)))
+                                        branch-table)
+                           :collect (multiple-value-bind (body-ty preds_ accessors_ body-node subs_)
+                                        (infer-expression-type body branch-ret-ty subs-for-branch-body branch-env)
+                                      (declare (ignore body-ty))
+                                      (setf subs subs_)
+                                      ;; TODO: Ditto preds comment
+                                      (setf preds (append preds
+                                                          pat-preds
+                                                          (tc:apply-substitution subs_ preds_)))
+                                      (setf accessors (append accessors accessors_))
+                                      (list :body-node body-node
+                                            :branch-delta nil)))))
+
+               ;; GADT branches were checked independently. Merge only the non-protected
+               ;; subs learned by each branch. If ordinary outer variables disagree
+               ;; across branches, this merge will fail.
+               (_merge-gadt-branch-deltas
+                 (when match-gadt-p
+                   (dolist (branch-body-dat branch-body-data)
+                     (setf subs
+                           (tc:merge-substitution-lists
+                            subs
+                            (getf branch-body-dat :branch-delta))))))
+
+               (branch-body-nodes (mapcar (lambda (branch-body-dat)
+                                            (getf branch-body-dat :body-node))
+                                          branch-body-data))
 
                (branch-nodes
                  (loop :for branch :in (parser:node-match-branches node)
@@ -2520,13 +2556,15 @@ Returns (VALUES INFERRED-TYPE PREDICATES NODE SUBSTITUTIONS)")
                                  :pattern pat-node
                                  :body branch-body-node
                                  :location (source:location branch)))))
+          (declare (ignore _merge-gadt-branch-deltas))
 
           (handler-case
               (progn
-                (format *error-output* "~&GADTDBG final loc=~S expected=~A ret=~A expr=~A final-subs=~{~A~^, ~}~%" (source:location node) (type-object-string (tc:apply-substitution subs expected-type)) (type-object-string (tc:apply-substitution subs ret-ty)) (type-object-string (tc:apply-substitution subs expr-ty)) (mapcar (lambda (s) (format nil "~A=>~A" (type-object-string (tc:substitution-from s)) (type-object-string (tc:substitution-to s)))) subs))
                 (unless match-gadt-p
                   (setf subs (tc:unify subs ret-ty expected-type)))
-                (let ((type (tc:apply-substitution subs ret-ty)))
+                (let ((type (tc:apply-substitution subs (if match-gadt-p
+                                                            expected-type
+                                                            ret-ty))))
                   (values
                    type
                    preds
