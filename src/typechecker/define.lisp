@@ -2389,28 +2389,29 @@ Returns (VALUES INFERRED-TYPE PREDICATES NODE SUBSTITUTIONS)")
                                subs
                                env)
 
-      (let* (;; Infer the type of each pattern, unifying against expr-ty, specialized for
-             ;; any branch-specific refinements from a GADT constructor.
-             (match-base-subs subs)
-
-             ;; After checking this branch pattern, which substitutions were learned specifically
-             ;; from this branch?
-             (branch-only-subs
-               (lambda (after before)
-                 (remove-if
-                  (lambda (sub)
-                    (find sub
-                          before
-                          :test (lambda (a b)
-                                  (and (tc:ty= (tc:substitution-from a)
-                                               (tc:substitution-from b))
-                                       (tc:ty= (tc:substitution-to a)
-                                               (tc:substitution-to b))))))
-                  after)))
+      (flet (;; Determine if the pattern contains a GADT constructor. Needs to recursively walk
+             ;; all constructors in the pattern.
+             (pattern-contains-gadt-p (pattern)
+               (labels ((walk (pat)
+                          (typecase pat
+                            (parser:pattern-constructor
+                             (let ((ctor (tc:lookup-constructor
+                                          (tc-env-env env)
+                                          (parser:pattern-constructor-name pat)
+                                          :no-error t)))
+                               (or (and ctor
+                                        (tc:constructor-entry-gadt-p ctor))
+                                   (some #'walk
+                                         (parser:pattern-constructor-patterns pat)))))
+                            (parser:pattern-binding
+                             (or (walk (parser:pattern-binding-pattern pat))
+                                 (walk (parser:pattern-binding-var pat))))
+                            (t
+                             nil))))
+                 (walk pattern)))
 
              ;; Remove substitutions that depend on this branch's pattern refinements.
-             (remove-branch-local-subs
-               (lambda (all-subs branch-subs)
+             (remove-branch-local-subs (all-subs branch-subs)
                  (let ((branch-vars (loop :for sub :in branch-subs
                                           :collect (tc:substitution-from sub))))
                    ;; Expand branch-vars until it includes every subs whose RHS mentions a pattern or
@@ -2432,77 +2433,98 @@ Returns (VALUES INFERRED-TYPE PREDICATES NODE SUBSTITUTIONS)")
                       (find (tc:substitution-from sub)
                             branch-vars
                             :test #'tc:ty=))
-                    all-subs))))
+                    all-subs)))
 
-             (branch-data
-               (loop :for branch :in (parser:node-match-branches node)
-                     :for pattern := (parser:node-match-branch-pattern branch)
-                     :for branch-env := (make-tc-env :env (tc-env-env env)
-                                                     :ty-table (alexandria:copy-hash-table (tc-env-ty-table env)))
-                     :collect (multiple-value-bind (pat-ty preds_ pat-node subs_)
-                                  (infer-pattern-type pattern expr-ty subs branch-env)
-                                (declare (ignore pat-ty))
-                                (list :pat-node pat-node
-                                      :branch-subs (funcall branch-only-subs
-                                                            subs_
-                                                            match-base-subs)
-                                      :pat-preds preds_
-                                      :pat-env-ty-table (tc-env-ty-table branch-env)))))
+             ;; After checking this branch pattern, which substitutions were learned specifically
+             ;; from this branch?
+             (branch-only-subs (after before)
+                 (remove-if
+                  (lambda (sub)
+                    (find sub
+                          before
+                          :test (lambda (a b)
+                                  (and (tc:ty= (tc:substitution-from a)
+                                               (tc:substitution-from b))
+                                       (tc:ty= (tc:substitution-to a)
+                                               (tc:substitution-to b))))))
+                  after)))
 
-             (ret-ty (tc:make-variable :kind tc:+kstar+ :allow-result-p t))
+        (let* (;; Infer the type of each pattern, unifying against expr-ty, specialized for
+               ;; any branch-specific refinements from a GADT constructor.
+               (match-base-subs subs)
 
-             ;; Infer the type of each branch, unifying against ret-ty
-             (branch-body-nodes
-               (loop :for branch :in (parser:node-match-branches node)
-                     :for branch-dat :in branch-data
-                     :for branch-subs := (getf branch-dat :branch-subs)
-                     :for subs-for-branch-body := (tc:compose-substitution-lists branch-subs subs)
-                     :for pat-preds := (tc:apply-substitution subs-for-branch-body (getf branch-dat :pat-preds))
-                     :for branch-ret-ty := (tc:apply-substitution subs-for-branch-body expected-type)
-                     :for branch-table := (getf branch-dat :pat-env-ty-table)
-                     :for branch-env := (make-tc-env :env (tc-env-env env)
-                                                     :ty-table branch-table)
-                     :for body := (parser:node-match-branch-body branch)
-                     :do (maphash (lambda (name scheme)
-                                    (setf (gethash name branch-table)
-                                          (tc:apply-substitution subs-for-branch-body scheme)))
-                                  branch-table)
-                     :collect (multiple-value-bind (body-ty preds_ accessors_ body-node subs_)
-                                  (infer-expression-type body branch-ret-ty subs-for-branch-body branch-env)
-                                (declare (ignore body-ty))
-                                (setf subs (funcall remove-branch-local-subs subs_ branch-subs))
-                                (setf preds (append preds
-                                                    pat-preds
-                                                    (tc:apply-substitution subs_ preds_)))
-                                (setf accessors (append accessors accessors_))
-                                body-node)))
+               (branch-data
+                 (loop :for branch :in (parser:node-match-branches node)
+                       :for pattern := (parser:node-match-branch-pattern branch)
+                       :for branch-env := (make-tc-env :env (tc-env-env env)
+                                                       :ty-table (alexandria:copy-hash-table (tc-env-ty-table env)))
+                       :collect (multiple-value-bind (pat-ty preds_ pat-node subs_)
+                                    (infer-pattern-type pattern expr-ty subs branch-env)
+                                  (declare (ignore pat-ty))
+                                  (list :pat-node pat-node
+                                        :branch-subs (branch-only-subs
+                                                      subs_
+                                                      match-base-subs)
+                                        :pat-preds preds_
+                                        :pat-env-ty-table (tc-env-ty-table branch-env)
+                                        :gadt-p (pattern-contains-gadt-p pattern)))))
 
-             (branch-nodes
-               (loop :for branch :in (parser:node-match-branches node)
-                     :for branch-dat :in branch-data
-                     :for pat-node := (getf branch-dat :pat-node)
-                     :for branch-body-node :in branch-body-nodes
-                     :collect (make-node-match-branch
-                               :pattern pat-node
-                               :body branch-body-node
-                               :location (source:location branch)))))
+               (ret-ty (tc:make-variable :kind tc:+kstar+ :allow-result-p t))
 
-        (handler-case
-            (progn
-              (setf subs (tc:unify subs ret-ty expected-type))
-              (let ((type (tc:apply-substitution subs ret-ty)))
-                (values
-                 type
-                 preds
-                 accessors
-                 (make-node-match
-                  :type (tc:qualify nil type)
-                  :location (source:location node)
-                  :expr expr-node
-                  :branches branch-nodes)
-                 subs)))
-          (tc:coalton-internal-type-error ()
-            (standard-expression-type-mismatch-error node subs expected-type ret-ty))))))
+               ;; Infer the type of each branch, unifying against ret-ty
+               (branch-body-nodes
+                 (loop :for branch :in (parser:node-match-branches node)
+                       :for branch-dat :in branch-data
+                       :for branch-subs := (getf branch-dat :branch-subs)
+                       :for subs-for-branch-body := (tc:compose-substitution-lists branch-subs subs)
+                       :for pat-preds := (tc:apply-substitution subs-for-branch-body (getf branch-dat :pat-preds))
+                       :for branch-ret-ty := (tc:apply-substitution subs-for-branch-body expected-type)
+                       :for branch-table := (getf branch-dat :pat-env-ty-table)
+                       :for branch-env := (make-tc-env :env (tc-env-env env)
+                                                       :ty-table branch-table)
+                       :for body := (parser:node-match-branch-body branch)
+                       :do (maphash (lambda (name scheme)
+                                      (setf (gethash name branch-table)
+                                            (tc:apply-substitution subs-for-branch-body scheme)))
+                                    branch-table)
+                       :collect (multiple-value-bind (body-ty preds_ accessors_ body-node subs_)
+                                    (infer-expression-type body branch-ret-ty subs-for-branch-body branch-env)
+                                  (declare (ignore body-ty))
+                                  (setf subs (if (getf branch-dat :gadt-p)
+                                                 (remove-branch-local-subs subs_ branch-subs)
+                                                 subs_))
+                                  (setf preds (append preds
+                                                      pat-preds
+                                                      (tc:apply-substitution subs_ preds_)))
+                                  (setf accessors (append accessors accessors_))
+                                  body-node)))
+
+               (branch-nodes
+                 (loop :for branch :in (parser:node-match-branches node)
+                       :for branch-dat :in branch-data
+                       :for pat-node := (getf branch-dat :pat-node)
+                       :for branch-body-node :in branch-body-nodes
+                       :collect (make-node-match-branch
+                                 :pattern pat-node
+                                 :body branch-body-node
+                                 :location (source:location branch)))))
+
+          (handler-case
+              (progn
+                (setf subs (tc:unify subs ret-ty expected-type))
+                (let ((type (tc:apply-substitution subs ret-ty)))
+                  (values
+                   type
+                   preds
+                   accessors
+                   (make-node-match
+                    :type (tc:qualify nil type)
+                    :location (source:location node)
+                    :expr expr-node
+                    :branches branch-nodes)
+                   subs)))
+            (tc:coalton-internal-type-error ()
+              (standard-expression-type-mismatch-error node subs expected-type ret-ty)))))))
 
   (:method ((node parser:node-catch) expected-type subs env)
     (declare (type tc:ty expected-type)

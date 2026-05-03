@@ -57,6 +57,7 @@
    #:constructor-entry-constructs           ; ACCESSOR
    #:constructor-entry-classname            ; ACCESSOR
    #:constructor-entry-compressed-repr      ; ACCESSOR
+   #:constructor-entry-gadt-p               ; ACCESSOR
    #:constructor-entry-list                 ; TYPE
    #:constructor-environment                ; STRUCT
    #:type-alias-entry                       ; STRUCT
@@ -513,7 +514,8 @@
 
   ;; If this constructor constructs a compressed-repr type then
   ;; compressed-repr is the runtime value of this nullary constructor
-  (compressed-repr (util:required 'compressed-repr) :type t                              :read-only t))
+  (compressed-repr (util:required 'compressed-repr) :type t                              :read-only t)
+  (gadt-p          nil                              :type boolean                        :read-only t))
 
 (defmethod source:docstring ((self constructor-entry))
   (constructor-entry-docstring self))
@@ -546,7 +548,8 @@
             :constructs 'coalton:Boolean
             :classname 'coalton::Boolean/True
             :docstring "Boolean `True`"
-            :compressed-repr 't))
+            :compressed-repr 't
+            :gadt-p nil))
 
           ('coalton:False
            (make-constructor-entry
@@ -556,7 +559,8 @@
             :constructs 'coalton:Boolean
             :classname 'coalton::Boolean/False
             :docstring "Boolean `False`"
-            :compressed-repr 'nil))
+            :compressed-repr 'nil
+            :gadt-p nil))
 
           ('coalton:Unit
           (make-constructor-entry
@@ -566,7 +570,8 @@
             :constructs 'coalton:Unit
             :classname 'coalton::Unit/Unit
             :docstring "`Unit` is the explicit one-value unit type, distinct from zero-value returns `()`."
-            :compressed-repr coalton-impl/constants:+value-of-unit+))
+            :compressed-repr coalton-impl/constants:+value-of-unit+
+            :gadt-p nil))
 
           ('coalton:Cons
            (make-constructor-entry
@@ -576,7 +581,8 @@
             :constructs 'coalton:List
             :classname nil
             :docstring "`Cons` represents a `List` containing a first element (`car`) and a nested `Cons` (`cdr`)."
-            :compressed-repr 'nil))
+            :compressed-repr 'nil
+            :gadt-p nil))
 
           ('coalton:Nil
            (make-constructor-entry
@@ -586,7 +592,8 @@
             :constructs 'coalton:List
             :classname nil
             :docstring "`Nil` represents an empty `List`."
-            :compressed-repr 'nil))
+            :compressed-repr 'nil
+            :gadt-p nil))
 
           ('coalton:Some
            (make-constructor-entry
@@ -596,7 +603,8 @@
             :constructs 'coalton:Optional
             :classname nil
             :docstring "`Some` expresses the presence of a meaningful value."
-            :compressed-repr 'nil))
+            :compressed-repr 'nil
+            :gadt-p nil))
 
           ('coalton:None
            (make-constructor-entry
@@ -606,7 +614,8 @@
             :constructs 'coalton:Optional
             :classname nil
             :docstring "`None` expresses the absence of a meaningful value."
-            :compressed-repr 'nil)))))
+            :compressed-repr 'nil
+            :gadt-p nil)))))
 
 #+(and sbcl coalton-release)
 (declaim (sb-ext:freeze-type constructor-environment))

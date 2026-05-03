@@ -685,7 +685,8 @@ This is conservative and intentionally aligns with mutable native wrappers."
                             :docstring ctor-docstring
                             :compressed-repr (if (eq repr-type :enum)
                                                  classname
-                                                 nil))))
+                                                 nil)
+                            :gadt-p (not (null (gethash ctor-name ctor-scheme-table))))))
 
               (type-definition
                 (make-type-definition
