@@ -2461,6 +2461,7 @@ Returns (VALUES INFERRED-TYPE PREDICATES NODE SUBSTITUTIONS)")
                        :collect (multiple-value-bind (pat-ty preds_ pat-node subs_)
                                     (infer-pattern-type pattern expr-ty subs branch-env)
                                   (declare (ignore pat-ty))
+                                  (format *error-output* "~&GADTDBG pattern loc=~S gadt=~S expr=~A pat=~A branch-subs=~{~A~^, ~}~%" (source:location pattern) (pattern-contains-gadt-p pattern) (type-object-string (tc:apply-substitution subs_ expr-ty)) (type-object-string (tc:apply-substitution subs_ pat-ty)) (mapcar (lambda (s) (format nil "~A=>~A" (type-object-string (tc:substitution-from s)) (type-object-string (tc:substitution-to s)))) (branch-only-subs subs_ match-base-subs)))
                                   (list :pat-node pat-node
                                         :branch-subs (branch-only-subs
                                                       subs_
@@ -2478,7 +2479,7 @@ Returns (VALUES INFERRED-TYPE PREDICATES NODE SUBSTITUTIONS)")
                        :for branch-subs := (getf branch-dat :branch-subs)
                        :for subs-for-branch-body := (tc:compose-substitution-lists branch-subs subs)
                        :for pat-preds := (tc:apply-substitution subs-for-branch-body (getf branch-dat :pat-preds))
-                       :for branch-ret-ty := (tc:apply-substitution subs-for-branch-body expected-type)
+                       :for branch-ret-ty := (tc:apply-substitution subs-for-branch-body ret-ty)
                        :for branch-table := (getf branch-dat :pat-env-ty-table)
                        :for branch-env := (make-tc-env :env (tc-env-env env)
                                                        :ty-table branch-table)
@@ -2490,6 +2491,7 @@ Returns (VALUES INFERRED-TYPE PREDICATES NODE SUBSTITUTIONS)")
                        :collect (multiple-value-bind (body-ty preds_ accessors_ body-node subs_)
                                     (infer-expression-type body branch-ret-ty subs-for-branch-body branch-env)
                                   (declare (ignore body-ty))
+                                  (format *error-output* "~&GADTDBG body loc=~S gadt=~S body-ty=~A branch-subs=~{~A~^, ~} clean-subs=~{~A~^, ~}~%" (source:location (parser:node-body-last-node body)) (getf branch-dat :gadt-p) (type-object-string (tc:apply-substitution subs_ body-ty)) (mapcar (lambda (s) (format nil "~A=>~A" (type-object-string (tc:substitution-from s)) (type-object-string (tc:substitution-to s)))) branch-subs) (mapcar (lambda (s) (format nil "~A=>~A" (type-object-string (tc:substitution-from s)) (type-object-string (tc:substitution-to s)))) (remove-branch-local-subs subs_ branch-subs)))
                                   (setf subs (if (getf branch-dat :gadt-p)
                                                  (remove-branch-local-subs subs_ branch-subs)
                                                  subs_))
@@ -2511,6 +2513,7 @@ Returns (VALUES INFERRED-TYPE PREDICATES NODE SUBSTITUTIONS)")
 
           (handler-case
               (progn
+                (format *error-output* "~&GADTDBG final loc=~S expected=~A ret=~A expr=~A final-subs=~{~A~^, ~}~%" (source:location node) (type-object-string (tc:apply-substitution subs expected-type)) (type-object-string (tc:apply-substitution subs ret-ty)) (type-object-string (tc:apply-substitution subs expr-ty)) (mapcar (lambda (s) (format nil "~A=>~A" (type-object-string (tc:substitution-from s)) (type-object-string (tc:substitution-to s)))) subs))
                 (setf subs (tc:unify subs ret-ty expected-type))
                 (let ((type (tc:apply-substitution subs ret-ty)))
                   (values
