@@ -2408,6 +2408,32 @@ Returns (VALUES INFERRED-TYPE PREDICATES NODE SUBSTITUTIONS)")
                                                (tc:substitution-to b))))))
                   after)))
 
+             ;; Remove substitutions that depend on this branch's pattern refinements.
+             (remove-branch-local-subs
+               (lambda (all-subs branch-subs)
+                 (let ((branch-vars (loop :for sub :in branch-subs
+                                          :collect (tc:substitution-from sub))))
+                   ;; Expand branch-vars until it includes every subs whose RHS mentions a pattern or
+                   ;; branch-local var.
+                   (loop :with changed := t
+                         :while changed
+                         :do (progn
+                               (setf changed nil)
+                               (dolist (sub all-subs)
+                                 (let ((from (tc:substitution-from sub))
+                                       (to-vars (tc:type-variables (tc:substitution-to sub))))
+                                   (when (and (not (find from branch-vars :test #'tc:ty=))
+                                              (intersection to-vars branch-vars :test #'tc:ty=))
+                                     (push from branch-vars)
+                                     (setf changed t))))))
+                   ;; Remove every substitution whose LHS is branch-local.
+                   (remove-if
+                    (lambda (sub)
+                      (find (tc:substitution-from sub)
+                            branch-vars
+                            :test #'tc:ty=))
+                    all-subs))))
+
              (branch-data
                (loop :for branch :in (parser:node-match-branches node)
                      :for pattern := (parser:node-match-branch-pattern branch)
@@ -2444,7 +2470,7 @@ Returns (VALUES INFERRED-TYPE PREDICATES NODE SUBSTITUTIONS)")
                      :collect (multiple-value-bind (body-ty preds_ accessors_ body-node subs_)
                                   (infer-expression-type body branch-ret-ty subs-for-branch-body branch-env)
                                 (declare (ignore body-ty))
-                                (setf subs subs_)
+                                (setf subs (funcall remove-branch-local-subs subs_ branch-subs))
                                 (setf preds (append preds
                                                     pat-preds
                                                     (tc:apply-substitution subs_ preds_)))
