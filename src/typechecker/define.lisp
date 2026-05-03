@@ -2470,6 +2470,11 @@ Returns (VALUES INFERRED-TYPE PREDICATES NODE SUBSTITUTIONS)")
                                         :pat-env-ty-table (tc-env-ty-table branch-env)
                                         :gadt-p (pattern-contains-gadt-p pattern)))))
 
+               (match-gadt-p
+                 (some (lambda (branch-dat)
+                         (getf branch-dat :gadt-p))
+                       branch-data))
+
                (ret-ty (tc:make-variable :kind tc:+kstar+ :allow-result-p t))
 
                ;; Infer the type of each branch, unifying against ret-ty
@@ -2479,7 +2484,9 @@ Returns (VALUES INFERRED-TYPE PREDICATES NODE SUBSTITUTIONS)")
                        :for branch-subs := (getf branch-dat :branch-subs)
                        :for subs-for-branch-body := (tc:compose-substitution-lists branch-subs subs)
                        :for pat-preds := (tc:apply-substitution subs-for-branch-body (getf branch-dat :pat-preds))
-                       :for branch-ret-ty := (tc:apply-substitution subs-for-branch-body ret-ty)
+                       :for branch-ret-ty := (tc:apply-substitution subs-for-branch-body (if match-gadt-p
+                                                                                             expected-type
+                                                                                             ret-ty))
                        :for branch-table := (getf branch-dat :pat-env-ty-table)
                        :for branch-env := (make-tc-env :env (tc-env-env env)
                                                        :ty-table branch-table)
@@ -2488,13 +2495,16 @@ Returns (VALUES INFERRED-TYPE PREDICATES NODE SUBSTITUTIONS)")
                                       (setf (gethash name branch-table)
                                             (tc:apply-substitution subs-for-branch-body scheme)))
                                     branch-table)
+                       :do (format *error-output* "~&GADTRET enter loc=~S gadt=~S expected/view=~A ret/global=~A ret/branch=~A body-input-subs=~{~A~^, ~}~%" (source:location (parser:node-body-last-node body)) (getf branch-dat :gadt-p) (type-object-string (tc:apply-substitution subs-for-branch-body expected-type)) (type-object-string (tc:apply-substitution subs ret-ty)) (type-object-string branch-ret-ty) (mapcar (lambda (s) (format nil "~A=>~A" (type-object-string (tc:substitution-from s)) (type-object-string (tc:substitution-to s)))) subs-for-branch-body))
                        :collect (multiple-value-bind (body-ty preds_ accessors_ body-node subs_)
                                     (infer-expression-type body branch-ret-ty subs-for-branch-body branch-env)
                                   (declare (ignore body-ty))
                                   (format *error-output* "~&GADTDBG body loc=~S gadt=~S body-ty=~A branch-subs=~{~A~^, ~} clean-subs=~{~A~^, ~}~%" (source:location (parser:node-body-last-node body)) (getf branch-dat :gadt-p) (type-object-string (tc:apply-substitution subs_ body-ty)) (mapcar (lambda (s) (format nil "~A=>~A" (type-object-string (tc:substitution-from s)) (type-object-string (tc:substitution-to s)))) branch-subs) (mapcar (lambda (s) (format nil "~A=>~A" (type-object-string (tc:substitution-from s)) (type-object-string (tc:substitution-to s)))) (remove-branch-local-subs subs_ branch-subs)))
+                                  (format *error-output* "~&GADTRET raw-exit loc=~S body=~A ret/raw=~A ret/clean=~A~%" (source:location (parser:node-body-last-node body)) (type-object-string (tc:apply-substitution subs_ body-ty)) (type-object-string (tc:apply-substitution subs_ ret-ty)) (type-object-string (tc:apply-substitution (remove-branch-local-subs subs_ branch-subs) ret-ty)))
                                   (setf subs (if (getf branch-dat :gadt-p)
                                                  (remove-branch-local-subs subs_ branch-subs)
                                                  subs_))
+                                  (format *error-output* "~&GADTRET shared-after loc=~S ret/shared=~A expected/shared=~A shared-subs=~{~A~^, ~}~%" (source:location (parser:node-body-last-node body)) (type-object-string (tc:apply-substitution subs ret-ty)) (type-object-string (tc:apply-substitution subs expected-type)) (mapcar (lambda (s) (format nil "~A=>~A" (type-object-string (tc:substitution-from s)) (type-object-string (tc:substitution-to s)))) subs))
                                   (setf preds (append preds
                                                       pat-preds
                                                       (tc:apply-substitution subs_ preds_)))
@@ -2514,7 +2524,8 @@ Returns (VALUES INFERRED-TYPE PREDICATES NODE SUBSTITUTIONS)")
           (handler-case
               (progn
                 (format *error-output* "~&GADTDBG final loc=~S expected=~A ret=~A expr=~A final-subs=~{~A~^, ~}~%" (source:location node) (type-object-string (tc:apply-substitution subs expected-type)) (type-object-string (tc:apply-substitution subs ret-ty)) (type-object-string (tc:apply-substitution subs expr-ty)) (mapcar (lambda (s) (format nil "~A=>~A" (type-object-string (tc:substitution-from s)) (type-object-string (tc:substitution-to s)))) subs))
-                (setf subs (tc:unify subs ret-ty expected-type))
+                (unless match-gadt-p
+                  (setf subs (tc:unify subs ret-ty expected-type)))
                 (let ((type (tc:apply-substitution subs ret-ty)))
                   (values
                    type
@@ -2527,7 +2538,9 @@ Returns (VALUES INFERRED-TYPE PREDICATES NODE SUBSTITUTIONS)")
                     :branches branch-nodes)
                    subs)))
             (tc:coalton-internal-type-error ()
-              (standard-expression-type-mismatch-error node subs expected-type ret-ty)))))))
+              (standard-expression-type-mismatch-error node subs expected-type (if match-gadt-p
+                                                                                   expected-type
+                                                                                   ret-ty))))))))
 
   (:method ((node parser:node-catch) expected-type subs env)
     (declare (type tc:ty expected-type)
