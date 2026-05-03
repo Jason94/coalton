@@ -43,7 +43,9 @@
    ))
 
 (in-package #:coalton-impl/typechecker/define)
-(declare (optimize (debug 3) (speed 0) (safety 3)))
+
+(declaim (optimize (speed 0) (space 0) (debug 3)))
+
 (defstruct (return-block-info
             (:constructor make-return-block-info (&key type first-return)))
   (type (util:required 'type) :type tc:ty              :read-only t)
@@ -2467,8 +2469,13 @@ Returns (VALUES INFERRED-TYPE PREDICATES NODE SUBSTITUTIONS)")
                ;; (Box :a), :a is protected. Each GADT branch may refine it differently.
                (protected-vars
                  (and match-gadt-p
-                      (tc:type-variables
-                       (tc:apply-substitution match-base-subs expr-ty))))
+                      (remove-duplicates
+                       (append
+                        (tc:type-variables expr-ty)
+
+                        (tc:type-variables
+                         (tc:apply-substitution match-base-subs expr-ty)))
+                       :test #'tc:ty=)))
                (_dbg-match (format *error-output* "~&GADTMERGE match loc=~S gadt=~S expected=~A expr=~A protected=~{~A~^, ~} base-subs=~{~A~^, ~}~%" (source:location node) match-gadt-p (type-object-string expected-type) (type-object-string (tc:apply-substitution match-base-subs expr-ty)) (mapcar #'type-object-string protected-vars) (mapcar (lambda (s) (format nil "~A=>~A" (type-object-string (tc:substitution-from s)) (type-object-string (tc:substitution-to s)))) match-base-subs)))
                (ret-ty (tc:make-variable :kind tc:+kstar+ :allow-result-p t))
 
@@ -2495,11 +2502,12 @@ Returns (VALUES INFERRED-TYPE PREDICATES NODE SUBSTITUTIONS)")
                            :collect (multiple-value-bind (body-ty preds_ accessors_ body-node subs_)
                                         (infer-expression-type body branch-ret-ty subs-for-branch-body branch-env)
                                       (declare (ignore body-ty))
-                                      (let* ((clean-subs
-                                               (remove-protected-subs subs_ protected-vars))
+                                      (format *error-output* "~&GADTPROVE delta loc=~S input=~{~A~^, ~} raw=~{~A~^, ~} raw-delta=~{~A~^, ~}~%" (source:location (parser:node-body-last-node body)) (mapcar (lambda (s) (format nil "~A=>~A" (type-object-string (tc:substitution-from s)) (type-object-string (tc:substitution-to s)))) subs-for-branch-body) (mapcar (lambda (s) (format nil "~A=>~A" (type-object-string (tc:substitution-from s)) (type-object-string (tc:substitution-to s)))) subs_) (mapcar (lambda (s) (format nil "~A=>~A" (type-object-string (tc:substitution-from s)) (type-object-string (tc:substitution-to s)))) (delta-subs subs_ subs-for-branch-body)))
+                                      (format *error-output* "~&GADTPROVE protected loc=~S protected=~{~A~^, ~} classified=~{~A~^ | ~}~%" (source:location (parser:node-body-last-node body)) (mapcar (lambda (v) (format nil "~A#~D" (type-object-string v) (tc:tyvar-id v))) protected-vars) (mapcar (lambda (s) (format nil "~A=>~A from-protected=~S rhs-protected=~S" (type-object-string (tc:substitution-from s)) (type-object-string (tc:substitution-to s)) (find (tc:substitution-from s) protected-vars :test #'tc:ty=) (intersection (tc:type-variables (tc:substitution-to s)) protected-vars :test #'tc:ty=))) (delta-subs subs_ subs-for-branch-body)))
+                                      (let* ((body-delta
+                                               (delta-subs subs_ subs-for-branch-body))
                                              (branch-delta
-                                               (delta-subs clean-subs match-base-subs)))
-                                        (format *error-output* "~&GADTMERGE body loc=~S expected=~A branch-ret=~A body=~A clean=~{~A~^, ~} delta=~{~A~^, ~}~%" (source:location (parser:node-body-last-node body)) (type-object-string expected-type) (type-object-string branch-ret-ty) (type-object-string (tc:apply-substitution subs_ body-ty)) (mapcar (lambda (s) (format nil "~A=>~A" (type-object-string (tc:substitution-from s)) (type-object-string (tc:substitution-to s)))) clean-subs) (mapcar (lambda (s) (format nil "~A=>~A" (type-object-string (tc:substitution-from s)) (type-object-string (tc:substitution-to s)))) branch-delta))
+                                               (remove-protected-subs body-delta protected-vars)))
                                         (setf preds (append preds
                                                             pat-preds
                                                             (tc:apply-substitution subs_ preds_)))
@@ -2526,7 +2534,6 @@ Returns (VALUES INFERRED-TYPE PREDICATES NODE SUBSTITUTIONS)")
                                         (infer-expression-type body branch-ret-ty subs-for-branch-body branch-env)
                                       (declare (ignore body-ty))
                                       (setf subs subs_)
-                                      ;; TODO: Ditto preds comment
                                       (setf preds (append preds
                                                           pat-preds
                                                           (tc:apply-substitution subs_ preds_)))
@@ -2541,6 +2548,7 @@ Returns (VALUES INFERRED-TYPE PREDICATES NODE SUBSTITUTIONS)")
                  (when match-gadt-p
                    (dolist (branch-body-dat branch-body-data)
                      (format *error-output* "~&GADTMERGE merge current=~{~A~^, ~} incoming=~{~A~^, ~}~%" (mapcar (lambda (s) (format nil "~A=>~A" (type-object-string (tc:substitution-from s)) (type-object-string (tc:substitution-to s)))) subs) (mapcar (lambda (s) (format nil "~A=>~A" (type-object-string (tc:substitution-from s)) (type-object-string (tc:substitution-to s)))) (getf branch-body-dat :branch-delta)))
+                     (format *error-output* "~&GADTPROVE merge-test ok=~S current=~{~A~^, ~} incoming=~{~A~^, ~}~%" (handler-case (progn (tc:merge-substitution-lists subs (getf branch-body-dat :branch-delta)) t) (tc:coalton-internal-type-error () nil)) (mapcar (lambda (s) (format nil "~A=>~A" (type-object-string (tc:substitution-from s)) (type-object-string (tc:substitution-to s)))) subs) (mapcar (lambda (s) (format nil "~A=>~A" (type-object-string (tc:substitution-from s)) (type-object-string (tc:substitution-to s)))) (getf branch-body-dat :branch-delta)))
                      (setf subs
                            (tc:merge-substitution-lists
                             subs
