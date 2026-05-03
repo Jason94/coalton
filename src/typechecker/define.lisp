@@ -43,7 +43,7 @@
    ))
 
 (in-package #:coalton-impl/typechecker/define)
-
+(declare (optimize (debug 3) (speed 0) (safety 3)))
 (defstruct (return-block-info
             (:constructor make-return-block-info (&key type first-return)))
   (type (util:required 'type) :type tc:ty              :read-only t)
@@ -2449,6 +2449,7 @@ Returns (VALUES INFERRED-TYPE PREDICATES NODE SUBSTITUTIONS)")
                        :collect (multiple-value-bind (pat-ty preds_ pat-node subs_)
                                     (infer-pattern-type pattern expr-ty subs branch-env)
                                   (declare (ignore pat-ty))
+                                  (format *error-output* "~&GADTMERGE pattern loc=~S gadt=~S expr=~A pat=~A branch-subs=~{~A~^, ~}~%" (source:location pattern) (pattern-contains-gadt-p pattern) (type-object-string (tc:apply-substitution subs_ expr-ty)) (type-object-string (tc:apply-substitution subs_ pat-ty)) (mapcar (lambda (s) (format nil "~A=>~A" (type-object-string (tc:substitution-from s)) (type-object-string (tc:substitution-to s)))) (delta-subs subs_ match-base-subs)))
                                   (list :pat-node pat-node
                                         :branch-subs (delta-subs
                                                       subs_
@@ -2468,7 +2469,7 @@ Returns (VALUES INFERRED-TYPE PREDICATES NODE SUBSTITUTIONS)")
                  (and match-gadt-p
                       (tc:type-variables
                        (tc:apply-substitution match-base-subs expr-ty))))
-
+               (_dbg-match (format *error-output* "~&GADTMERGE match loc=~S gadt=~S expected=~A expr=~A protected=~{~A~^, ~} base-subs=~{~A~^, ~}~%" (source:location node) match-gadt-p (type-object-string expected-type) (type-object-string (tc:apply-substitution match-base-subs expr-ty)) (mapcar #'type-object-string protected-vars) (mapcar (lambda (s) (format nil "~A=>~A" (type-object-string (tc:substitution-from s)) (type-object-string (tc:substitution-to s)))) match-base-subs)))
                (ret-ty (tc:make-variable :kind tc:+kstar+ :allow-result-p t))
 
                (branch-body-data
@@ -2498,6 +2499,7 @@ Returns (VALUES INFERRED-TYPE PREDICATES NODE SUBSTITUTIONS)")
                                                (remove-protected-subs subs_ protected-vars))
                                              (branch-delta
                                                (delta-subs clean-subs match-base-subs)))
+                                        (format *error-output* "~&GADTMERGE body loc=~S expected=~A branch-ret=~A body=~A clean=~{~A~^, ~} delta=~{~A~^, ~}~%" (source:location (parser:node-body-last-node body)) (type-object-string expected-type) (type-object-string branch-ret-ty) (type-object-string (tc:apply-substitution subs_ body-ty)) (mapcar (lambda (s) (format nil "~A=>~A" (type-object-string (tc:substitution-from s)) (type-object-string (tc:substitution-to s)))) clean-subs) (mapcar (lambda (s) (format nil "~A=>~A" (type-object-string (tc:substitution-from s)) (type-object-string (tc:substitution-to s)))) branch-delta))
                                         (setf preds (append preds
                                                             pat-preds
                                                             (tc:apply-substitution subs_ preds_)))
@@ -2538,6 +2540,7 @@ Returns (VALUES INFERRED-TYPE PREDICATES NODE SUBSTITUTIONS)")
                (_merge-gadt-branch-deltas
                  (when match-gadt-p
                    (dolist (branch-body-dat branch-body-data)
+                     (format *error-output* "~&GADTMERGE merge current=~{~A~^, ~} incoming=~{~A~^, ~}~%" (mapcar (lambda (s) (format nil "~A=>~A" (type-object-string (tc:substitution-from s)) (type-object-string (tc:substitution-to s)))) subs) (mapcar (lambda (s) (format nil "~A=>~A" (type-object-string (tc:substitution-from s)) (type-object-string (tc:substitution-to s)))) (getf branch-body-dat :branch-delta)))
                      (setf subs
                            (tc:merge-substitution-lists
                             subs
