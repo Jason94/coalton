@@ -2607,18 +2607,6 @@ Returns (VALUES INFERRED-TYPE PREDICATES NODE SUBSTITUTIONS)")
                (_merge-gadt-branch-deltas
                  (when match-gadt-p
                    (dolist (branch-body-dat branch-body-data)
-                     (let* ((visible-vars
-                              (remove-duplicates
-                               (append
-                                (tc:type-variables expected-type)
-                                (loop :for scheme :being :the :hash-values :of (tc-env-ty-table env)
-                                      :append (tc:type-variables scheme)))
-                               :test #'tc:ty=))
-                            (proposed-incoming
-                              (remove-if-not
-                               (lambda (sub)
-                                 (find (tc:substitution-from sub) visible-vars :test #'tc:ty=))
-                               (getf branch-body-dat :branch-delta)))))
                      (setf subs
                            (merge-gadt-branch-delta
                             subs
