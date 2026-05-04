@@ -27,6 +27,7 @@
    #:parse-ty-scheme                    ; FUNCTION
    #:infer-type-kinds                   ; FUNCTION
    #:infer-predicate-kinds              ; FUNCTION
+   #:seed-qualified-type-variables      ; FUNCTION
    ))
 
 (in-package #:coalton-impl/typechecker/parse-type)
