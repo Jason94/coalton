@@ -44,8 +44,6 @@
 
 (in-package #:coalton-impl/typechecker/define)
 
-(declaim (optimize (speed 0) (space 0) (debug 3)))
-
 (defstruct (return-block-info
             (:constructor make-return-block-info (&key type first-return)))
   (type (util:required 'type) :type tc:ty              :read-only t)

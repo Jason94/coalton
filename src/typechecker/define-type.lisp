@@ -31,6 +31,7 @@
    #:type-definition-constructors       ; ACCESSOR
    #:type-definition-constructor-types  ; ACCESSOR
    #:type-definition-docstring          ; ACCESSOR
+   #:type-definition-gadt-p             ; ACCESSOR
    #:type-definition-list               ; TYPE
    ))
 
@@ -62,7 +63,8 @@
   (docstring         (util:required 'docstring)         :type (or null string)          :read-only t)
   (location          (util:required 'location)          :type source:location           :read-only t)
   (exception-p       (util:required 'exception-p)       :type boolean                   :read-only t)
-  (resumption-p      (util:required 'resumption-p)      :type boolean                   :read-only t))
+  (resumption-p      (util:required 'resumption-p)      :type boolean                   :read-only t)
+  (gadt-p            (util:required 'gadt-p)            :type boolean                   :read-only t))
 
 (defmethod source:location ((self type-definition))
   (type-definition-location self))
@@ -419,7 +421,8 @@ This is conservative and intentionally aligns with mutable native wrappers."
           :docstring (source:docstring type)
           :location (source:location parsed-type)
           :exception-p (type-definition-exception-p type)
-          :resumption-p (type-definition-resumption-p type))))
+          :resumption-p (type-definition-resumption-p type)
+          :gadt-p (type-definition-gadt-p type))))
 
   ;; Define the type's constructors in the environment
   (loop :for ctor :in (type-definition-constructors type)
@@ -719,7 +722,8 @@ This is conservative and intentionally aligns with mutable native wrappers."
                  :docstring (source:docstring type)
                  :location (source:location type)
                  :exception-p (parser:type-definition-exception-p type)
-                 :resumption-p (parser:type-definition-resumption-p type))))
+                 :resumption-p (parser:type-definition-resumption-p type)
+                 :gadt-p (not (zerop (hash-table-count ctor-scheme-table))))))
 
            (setf instances
                  ;; Some generated instances depend only on the raw type
