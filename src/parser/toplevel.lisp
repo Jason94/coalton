@@ -33,6 +33,7 @@
    #:constructor-signature                       ; ACCESSOR
    #:constructor-fields                          ; ACCESSOR
    #:constructor-list                            ; TYPE
+   #:constructor-gadt-p                          ; FUNCTION
    #:toplevel-define-type                        ; STRUCT
    #:make-toplevel-define-type                   ; CONSTRUCTOR
    #:toplevel-define-type-name                   ; ACCESSOR
@@ -263,6 +264,12 @@
   (fields    (util:required 'fields)    :type ty-list                :read-only t)
   (docstring (util:required 'docstring) :type (or null string)       :read-only t)
   (location  (util:required 'location)  :type source:location        :read-only t))
+
+(defun constructor-gadt-p (constr)
+  (declare (type constructor constr)
+           (values boolean))
+  (when (constructor-signature constr)
+    t))
 
 (defmethod source:location ((self constructor))
   (constructor-location self))
@@ -1294,35 +1301,43 @@ consume all attributes")))
      :vars (reverse variables)
      :docstring docstring
      :ctors
-     (loop
-       :for constructors_
-         := (cst:nthrest (if docstring 3 2) form)
-           :then (cst:rest constructors_)
-       :with ctors := nil
-       :while (cst:consp constructors_)
+     (let ((has-adt-ctor nil)
+           (has-gadt-ctor nil))
+       (loop
+         :for constructors_
+           := (cst:nthrest (if docstring 3 2) form)
+             :then (cst:rest constructors_)
+         :with ctors := nil
+         :while (cst:consp constructors_)
 
-       ;; check for duplicate docstrings
-       :when (and (cst:atom (cst:first constructors_))
-                  (stringp (cst:raw (cst:first constructors_)))
-                  (not (cst:null (cst:rest constructors_)))
-                  (cst:atom (cst:second constructors_))
-                  (stringp (cst:raw (cst:second constructors_))))
-         :do (parse-error (format nil "Malformed ~a definition" definition-category)
-                          (note source
-                                (cst:second constructors_)
-                                "only one docstring allowed per constructor"))
+         ;; check for duplicate docstrings
+         :when (and (cst:atom (cst:first constructors_))
+                    (stringp (cst:raw (cst:first constructors_)))
+                    (not (cst:null (cst:rest constructors_)))
+                    (cst:atom (cst:second constructors_))
+                    (stringp (cst:raw (cst:second constructors_))))
+           :do (parse-error (format nil "Malformed ~a definition" definition-category)
+                            (note source
+                                  (cst:second constructors_)
+                                  "only one docstring allowed per constructor"))
 
-             ;; collect constructors with docstrings if they follow
-       :do (let ((ctor-docstring (if (and (not (cst:null (cst:rest constructors_)))
-                                          (cst:atom (cst:second constructors_))
-                                          (stringp (cst:raw (cst:second constructors_))))
-                                     (cst:raw (cst:second constructors_))
-                                     nil)))
-             (unless (stringp (cst:raw (cst:first constructors_)))
-               (push
-                (parse-constructor (cst:first constructors_) form ctor-docstring source)
-                ctors)))
-       :finally (return ctors))
+         ;; collect constructors with docstrings if they follow
+         :do (let ((ctor-docstring (if (and (not (cst:null (cst:rest constructors_)))
+                                            (cst:atom (cst:second constructors_))
+                                            (stringp (cst:raw (cst:second constructors_))))
+                                       (cst:raw (cst:second constructors_))
+                                       nil)))
+               (unless (stringp (cst:raw (cst:first constructors_)))
+                 (let ((ctor (parse-constructor (cst:first constructors_) form ctor-docstring source)))
+                   (if (constructor-gadt-p ctor)
+                       (setf has-gadt-ctor t)
+                       (setf has-adt-ctor t))
+                   (push ctor ctors))))
+         :finally (progn
+                    (when (and has-adt-ctor has-gadt-ctor)
+                      (parse-error (format nil "Malformed ~a definition" definition-category)
+                                   (note source form " cannot define implicitly and explicitly typed constructors")))
+                    (return ctors))))
      :repr nil
      :derive nil
      :location (form-location source form)
