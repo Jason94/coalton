@@ -55,6 +55,7 @@
    #:kind-of                            ; FUNCTION
    #:type-constructors                  ; FUNCTION
    #:ty=                                ; FUNCTION
+   #:union-tys                          ; FUNCTION
    #:*boolean-type*                     ; VARIABLE
    #:*unit-type*                        ; VARIABLE
    #:*char-type*                        ; VARIABLE
@@ -545,6 +546,11 @@ Examples:
   (:method (type1 type2)
     (declare (ignore type1 type2))
     nil))
+
+(defun union-tys (a b)
+  "Calculate the union of two ty lists, using ty=."
+  (remove-duplicates (append a b)
+                     :test #'ty=))
 
 ;;;
 ;;; Early types

@@ -14,7 +14,8 @@
    (#:algo #:coalton-impl/algorithm)
    (#:parser #:coalton-impl/parser)
    (#:tc #:coalton-impl/typechecker/stage-1)
-   (#:derive #:coalton-impl/typechecker/derive))
+   (#:derive #:coalton-impl/typechecker/derive)
+   (#:pt #:coalton-impl/typechecker/parse-type))
   (:export
    #:toplevel-define-type               ; FUNCTION
    #:type-definition                    ; STRUCT
@@ -491,12 +492,17 @@ This is conservative and intentionally aligns with mutable native wrappers."
                    (cond
                      ;; GADTs are typed by their function signature
                      (ctor-signature
-                      (multiple-value-bind (qual-ty ksubs_)
-                          (infer-type-kinds ctor-signature tc:+kstar+ ksubs env)
-                        (setf ksubs ksubs_)
-                        (setf (gethash ctor-name ctor-scheme-table) qual-ty)
-                        (setf (gethash ctor-name ctor-table)
-                              (tc:function-type-arguments qual-ty))))
+                      (let ((branch-env (make-partial-type-env
+                                         :env (partial-type-env-env env)
+                                         :ty-table (alexandria:copy-hash-table (partial-type-env-ty-table env)))))
+                        (pt:seed-qualified-type-variables ctor-signature branch-env)
+                        (multiple-value-bind (qual-ty ksubs_)
+                            (infer-type-kinds ctor-signature tc:+kstar+ ksubs branch-env)
+                          (setf ksubs ksubs_)
+                          (setf (gethash ctor-name ctor-scheme-table) qual-ty)
+                          (setf (gethash ctor-name ctor-table)
+                                (tc:function-type-arguments qual-ty)))))
+
                      ;; ADTs are typed by their constructor fields
                      (t
                       (let ((fields (loop
