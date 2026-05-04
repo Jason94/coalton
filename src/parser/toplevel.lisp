@@ -44,6 +44,8 @@
    #:toplevel-define-type-head-location          ; ACCESSOR
    #:toplevel-define-type-exception-p            ; ACCESSOR
    #:toplevel-define-type-resumption-p           ; ACCESSOR
+   #:toplevel-define-type-p                      ; FUNCTION
+   #:toplevel-define-type-gadt-p                 ; FUNCTION
    #:toplevel-define-type-list                   ; TYPE
    #:toplevel-define-type-alias                  ; STRUCT
    #:make-toplevel-define-type-alias             ; CONSTRUCTOR
@@ -306,6 +308,13 @@
   (head-location (util:required 'head-location) :type source:location            :read-only t)
   (exception-p   (util:required 'exception-p)   :type boolean                    :read-only t)
   (resumption-p  (util:required 'resumption-p)  :type boolean                    :read-only t))
+
+(defun toplevel-define-type-gadt-p (type)
+  (declare (type toplevel-define-type type)
+           (values boolean))
+  (dolist (ctor (toplevel-define-type-ctors type))
+    (when (constructor-gadt-p ctor)
+      (return t))))
 
 (eval-when (:load-toplevel :compile-toplevel :execute)
   (defun toplevel-define-type-list-p (x)
