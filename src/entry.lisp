@@ -45,6 +45,10 @@ The hook runs after type checking and before analysis/code generation, while the
 typed AST still carries source locations. IDE integrations can bind this to
 collect ranges for hover/autodoc/eldoc queries.")
 
+(defun ide-integration-p ()
+  "Returns T if ide integration to collect type info is hooked."
+  (not (null *type-at-symbol-hook*)))
+
 (defstruct (type-at-symbol-info
             (:copier nil))
   "IDE-oriented type information for one source occurrence of a Coalton symbol.
@@ -288,7 +292,6 @@ eldoc integrations. The return value is sorted by source location."
                   (string< (or (type-at-symbol-info-source-name a) "")
                            (or (type-at-symbol-info-source-name b) ""))))))))
 
-
 (defun entry-point (program)
   (declare (type parser:program program))
 
@@ -374,7 +377,8 @@ eldoc integrations. The return value is sorted by source location."
                         :do (loop :for (method-codegen-sym . inline-p) :in method-codegen-inline-p
                                   :do (when inline-p (setf (gethash method-codegen-sym inline-p-table) t))))
 
-                  (collect-translation-unit-type-at-symbol-info translation-unit env)
+                  (when (ide-integration-p)
+                    (collect-translation-unit-type-at-symbol-info translation-unit env))
 
                   (analysis:analyze-translation-unit translation-unit env)
 
