@@ -111,3 +111,33 @@
 
 (define-test test-gadt3-func ()
   (is (gadt3-test-func (Gadt3-1 "test"))))
+
+;;;
+;;; Type with One Arg w/ Single, Single-Arg Concrete Constructor
+;;;
+
+;; (coalton-toplevel
+
+;;   (define-type (Gadt4 :a)
+;;     (Gadt4-1 (Type (Integer -> Gadt4 Integer))))
+;;   )
+
+;; (coalton-toplevel
+
+;;   (declare gadt4-add1->int (Gadt4 :a -> Integer))
+;;   (define (gadt4-add1->int g)
+;;     (1+ x))
+;;   )
+
+;; (coalton-toplevel
+
+;;   (declare gadt4-add1->int (Gadt4 :a -> Integer))
+;;   (define (gadt4-add1->int (Gadt4-1 x))
+;;     (1+ x))
+;;   )
+
+;; (coalton-toplevel
+;;   (declare gadt4-add1 (Gadt4 :a -> Gadt4 :a))
+;;   (define (gadt4-add1 (Gadt4-1 x))
+;;     (Gadt4-1 (1+ x)))
+;; )

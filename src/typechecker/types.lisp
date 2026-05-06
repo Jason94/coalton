@@ -547,9 +547,10 @@ Examples:
     (declare (ignore type1 type2))
     nil))
 
-(defun union-tys (a b)
-  "Calculate the union of two ty lists, using ty=."
-  (remove-duplicates (append a b)
+(defun union-tys (cl:&rest ty-lists)
+  "Calculate the union of ty lists, using ty=."
+  (declare (values ty-list))
+  (remove-duplicates (apply #'append ty-lists)
                      :test #'ty=))
 
 ;;;
