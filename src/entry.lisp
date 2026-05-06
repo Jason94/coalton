@@ -72,6 +72,26 @@ printer-friendly representation in ENV."
       (when (and source span)
         (source:extract-source-text source span)))))
 
+(defun narrow-location-to-symbol (location name)
+  "Return a smaller source location around NAME within LOCATION, plus source spelling.
+
+Typed pattern constructor locations usually cover the whole pattern form, e.g.
+`(Asteroid)`, but the IDE wants the constructor token itself. This helper is
+purely source-location bookkeeping; it does not query or mutate the typechecker
+environment."
+  (let* ((source (and location (source:location-source location)))
+         (span (and location (source:location-span location)))
+         (token (and name (symbol-name name)))
+         (text (and source span token (source:extract-source-text source span))))
+    (when (and source span token text)
+      (let ((relative-start (search token text :test #'char-equal)))
+        (when relative-start
+          (let* ((absolute-start (+ (source:span-start span) relative-start))
+                 (absolute-end (+ absolute-start (length token)))
+                 (display-name (subseq text relative-start (+ relative-start (length token)))))
+            (values (source:make-location source (cons absolute-start absolute-end))
+                    display-name)))))))
+
 (defun make-type-at-symbol-info* (name type location env category &optional display-name)
   (when (and location type)
     (let* ((source (source:location-source location))
@@ -113,19 +133,20 @@ printer-friendly representation in ENV."
      ;; The pattern constructor itself is a symbol occurrence too. Without
      ;; this, hovering a nullary constructor pattern like (Asteroid) falls
      ;; through to the nearest enclosing expression, often a whole macro/do
-     ;; form with type Unit.
-     (let* ((name (tc:pattern-constructor-name pattern))
-            (constructor-type (tc:lookup-value-type env name :no-error t)))
-       (setf results
-             (maybe-emit-type-at-symbol-info
-              (make-type-at-symbol-info* name
-                                          (or constructor-type
-                                              (tc:pattern-type pattern))
-                                          (source:location pattern)
-                                          env
-                                          :pattern-constructor
-                                          (symbol-name name))
-              results)))
+     ;; form with type Unit. Use PATTERN-TYPE and a narrowed source span; do
+     ;; not look up or instantiate the constructor's value type here.
+     (let ((name (tc:pattern-constructor-name pattern)))
+       (multiple-value-bind (location display-name)
+           (narrow-location-to-symbol (source:location pattern) name)
+         (setf results
+               (maybe-emit-type-at-symbol-info
+                (make-type-at-symbol-info* name
+                                            (tc:pattern-type pattern)
+                                            (or location (source:location pattern))
+                                            env
+                                            :pattern-constructor
+                                            (or display-name (symbol-name name)))
+                results))))
      (dolist (child (tc:pattern-constructor-patterns pattern) results)
        (setf results (collect-pattern-type-at-symbol-info child env results))))
     (t results)))
