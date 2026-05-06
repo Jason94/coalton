@@ -13,6 +13,19 @@
    (#:codegen #:coalton-impl/codegen))
   (:export
    #:*global-environment*
+   #:*type-at-symbol-hook*              ; VARIABLE
+   #:type-at-symbol-info                ; STRUCT
+   #:type-at-symbol-info-name           ; ACCESSOR
+   #:type-at-symbol-info-display-name   ; ACCESSOR
+   #:type-at-symbol-info-category       ; ACCESSOR
+   #:type-at-symbol-info-type           ; ACCESSOR
+   #:type-at-symbol-info-type-string    ; ACCESSOR
+   #:type-at-symbol-info-source         ; ACCESSOR
+   #:type-at-symbol-info-source-name    ; ACCESSOR
+   #:type-at-symbol-info-source-file-path ; ACCESSOR
+   #:type-at-symbol-info-start          ; ACCESSOR
+   #:type-at-symbol-info-end            ; ACCESSOR
+   #:collect-translation-unit-type-at-symbol-info ; FUNCTION
    #:entry-point                        ; FUNCTION
    #:expression-entry-point             ; FUNCTION
    #:codegen                            ; FUNCTION
@@ -24,6 +37,235 @@
 (in-package #:coalton-impl/entry)
 
 (defvar *global-environment* (tc:make-default-environment))
+
+(defvar *type-at-symbol-hook* nil
+  "Hook called with one TYPE-AT-SYMBOL-INFO object for each typed symbol seen during compilation.
+
+The hook runs after type checking and before analysis/code generation, while the
+typed AST still carries source locations. IDE integrations can bind this to
+collect ranges for hover/autodoc/eldoc queries.")
+
+(defstruct (type-at-symbol-info
+            (:copier nil))
+  "IDE-oriented type information for one source occurrence of a Coalton symbol.
+
+START and END are zero-based character offsets into SOURCE. CATEGORY is one of
+:DEFINITION, :BINDING, :PATTERN, or :REFERENCE. NAME is the
+compiler's identifier after renaming; DISPLAY-NAME preserves the source spelling
+when it is available. TYPE is the qualified type object and TYPE-STRING is its
+printer-friendly representation in ENV."
+  (name nil :read-only t)
+  (display-name nil :type (or null string) :read-only t)
+  (category nil :type keyword :read-only t)
+  (type nil :read-only t)
+  (type-string nil :type (or null string) :read-only t)
+  (source nil :read-only t)
+  (source-name nil :type (or null string) :read-only t)
+  (source-file-path nil :type (or null string) :read-only t)
+  (start nil :type (or null fixnum) :read-only t)
+  (end nil :type (or null fixnum) :read-only t))
+
+(defun symbol-source-text (location)
+  (when location
+    (let ((source (source:location-source location))
+          (span (source:location-span location)))
+      (when (and source span)
+        (source:extract-source-text source span)))))
+
+(defun make-type-at-symbol-info* (name type location env category &optional display-name)
+  (when (and location type)
+    (let* ((source (source:location-source location))
+           (span (source:location-span location)))
+      (make-type-at-symbol-info
+       :name name
+       :display-name (or display-name (symbol-source-text location))
+       :category category
+       :type type
+       :type-string (tc:type-to-string type env)
+       :source source
+       :source-name (and source (source:source-name source))
+       :source-file-path (and source (source:source-file-path source))
+       :start (and span (source:span-start span))
+       :end (and span (source:span-end span))))))
+
+(defun maybe-emit-type-at-symbol-info (info results)
+  (when info
+    (when *type-at-symbol-hook*
+      (funcall *type-at-symbol-hook* info))
+    (push info results))
+  results)
+
+(defun collect-pattern-type-at-symbol-info (pattern env results)
+  (typecase pattern
+    (tc:pattern-var
+     (maybe-emit-type-at-symbol-info
+      (make-type-at-symbol-info* (tc:pattern-var-name pattern)
+                                  (tc:pattern-type pattern)
+                                  (source:location pattern)
+                                  env
+                                  :pattern
+                                  (symbol-name (tc:pattern-var-orig-name pattern)))
+      results))
+    (tc:pattern-binding
+     (setf results (collect-pattern-type-at-symbol-info (tc:pattern-binding-var pattern) env results))
+     (collect-pattern-type-at-symbol-info (tc:pattern-binding-pattern pattern) env results))
+    (tc:pattern-constructor
+     ;; The pattern constructor itself is a symbol occurrence too. Without
+     ;; this, hovering a nullary constructor pattern like (Asteroid) falls
+     ;; through to the nearest enclosing expression, often a whole macro/do
+     ;; form with type Unit.
+     (let* ((name (tc:pattern-constructor-name pattern))
+            (constructor-type (tc:lookup-value-type env name :no-error t)))
+       (setf results
+             (maybe-emit-type-at-symbol-info
+              (make-type-at-symbol-info* name
+                                          (or constructor-type
+                                              (tc:pattern-type pattern))
+                                          (source:location pattern)
+                                          env
+                                          :pattern-constructor
+                                          (symbol-name name))
+              results)))
+     (dolist (child (tc:pattern-constructor-patterns pattern) results)
+       (setf results (collect-pattern-type-at-symbol-info child env results))))
+    (t results)))
+
+(defun collect-patterns-type-at-symbol-info (patterns env results)
+  (dolist (pattern patterns results)
+    (setf results (collect-pattern-type-at-symbol-info pattern env results))))
+
+(defun collect-definition-type-at-symbol-info (definition env results)
+  (let ((name (tc:toplevel-define-name definition)))
+    (setf results
+          (maybe-emit-type-at-symbol-info
+           (make-type-at-symbol-info* (tc:node-variable-name name)
+                                       (tc:node-type name)
+                                       (source:location name)
+                                       env
+                                       :definition)
+           results))
+    (setf results (collect-patterns-type-at-symbol-info (tc:toplevel-define-params definition) env results))
+    (tc:traverse
+     (tc:toplevel-define-body definition)
+     (tc:make-traverse-block
+      :variable
+      (lambda (node)
+        (setf results
+              (maybe-emit-type-at-symbol-info
+               (make-type-at-symbol-info* (tc:node-variable-name node)
+                                           (tc:node-type node)
+                                           (source:location node)
+                                           env
+                                           :reference)
+               results))
+        node)
+      :bind
+      (lambda (node)
+        (setf results (collect-pattern-type-at-symbol-info (tc:node-bind-pattern node) env results))
+        node)
+      :values-bind
+      (lambda (node)
+        (setf results (collect-patterns-type-at-symbol-info (tc:node-values-bind-patterns node) env results))
+        node)
+      :abstraction
+      (lambda (node)
+        (setf results (collect-patterns-type-at-symbol-info (tc:node-abstraction-params node) env results))
+        node)
+      :let-binding
+      (lambda (node)
+        (let ((name (tc:node-let-binding-name node)))
+          (setf results
+                (maybe-emit-type-at-symbol-info
+                 (make-type-at-symbol-info* (tc:node-variable-name name)
+                                             (tc:node-type name)
+                                             (source:location name)
+                                             env
+                                             :binding)
+                 results)))
+        node)
+      :dynamic-binding
+      (lambda (node)
+        (let ((name (tc:node-dynamic-binding-name node)))
+          (setf results
+                (maybe-emit-type-at-symbol-info
+                 (make-type-at-symbol-info* (tc:node-variable-name name)
+                                             (tc:node-type name)
+                                             (source:location name)
+                                             env
+                                             :binding)
+                 results)))
+        node)
+      :match-branch
+      (lambda (node)
+        (setf results (collect-pattern-type-at-symbol-info (tc:node-match-branch-pattern node) env results))
+        node)
+      :catch-branch
+      (lambda (node)
+        (setf results (collect-pattern-type-at-symbol-info (tc:node-catch-branch-pattern node) env results))
+        node)
+      :resumable-branch
+      (lambda (node)
+        (setf results (collect-pattern-type-at-symbol-info (tc:node-resumable-branch-pattern node) env results))
+        node)
+      :do-bind
+      (lambda (node)
+        (setf results (collect-pattern-type-at-symbol-info (tc:node-do-bind-pattern node) env results))
+        node)
+      :loop
+      (lambda (node)
+        (dolist (binding (tc:node-for-bindings node))
+          (let ((name (tc:node-for-binding-name binding)))
+            (setf results
+                  (maybe-emit-type-at-symbol-info
+                   (make-type-at-symbol-info* (tc:node-variable-name name)
+                                               (tc:node-type name)
+                                               (source:location name)
+                                               env
+                                               :binding)
+                   results))))
+        node))))
+  results)
+
+(defun collect-instance-method-type-at-symbol-info (method env results)
+  (collect-definition-type-at-symbol-info
+   (tc:make-toplevel-define
+    :name (tc:instance-method-definition-name method)
+    :params (tc:instance-method-definition-params method)
+    :keyword-params (tc:instance-method-definition-keyword-params method)
+    :function-syntax-p (tc:instance-method-definition-function-syntax-p method)
+    :body (tc:instance-method-definition-body method)
+    :location (source:location method))
+   env
+   results))
+
+(defun collect-instance-type-at-symbol-info (instance env results)
+  (maphash (lambda (_name method)
+             (declare (ignore _name))
+             (setf results (collect-instance-method-type-at-symbol-info method env results)))
+           (tc:toplevel-define-instance-methods instance))
+  results)
+
+(defun collect-translation-unit-type-at-symbol-info (translation-unit env)
+  "Return all typed symbol occurrences in TRANSLATION-UNIT and call `*type-at-symbol-hook*' for each one.
+
+This is intended as the compiler-side data source for SLIME/SLY/LSP hover and
+eldoc integrations. The return value is sorted by source location."
+  (let ((results nil))
+    (dolist (definition (tc:translation-unit-definitions translation-unit))
+      (setf results (collect-definition-type-at-symbol-info definition env results)))
+    (dolist (instance (tc:translation-unit-instances translation-unit))
+      (setf results (collect-instance-type-at-symbol-info instance env results)))
+    (sort (nreverse results)
+          (lambda (a b)
+            (let ((a-source (type-at-symbol-info-source a))
+                  (b-source (type-at-symbol-info-source b))
+                  (a-start (or (type-at-symbol-info-start a) -1))
+                  (b-start (or (type-at-symbol-info-start b) -1)))
+              (if (eq a-source b-source)
+                  (< a-start b-start)
+                  (string< (or (type-at-symbol-info-source-name a) "")
+                           (or (type-at-symbol-info-source-name b) ""))))))))
+
 
 (defun entry-point (program)
   (declare (type parser:program program))
@@ -109,6 +351,8 @@
                         :for method-codegen-inline-p := (tc:ty-class-instance-method-codegen-inline-p ty-instance)
                         :do (loop :for (method-codegen-sym . inline-p) :in method-codegen-inline-p
                                   :do (when inline-p (setf (gethash method-codegen-sym inline-p-table) t))))
+
+                  (collect-translation-unit-type-at-symbol-info translation-unit env)
 
                   (analysis:analyze-translation-unit translation-unit env)
 
