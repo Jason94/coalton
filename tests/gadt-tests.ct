@@ -1,0 +1,113 @@
+(in-package #:coalton-native-tests)
+
+;;;
+;;; Concrete Type with Unary Constructor
+;;;
+
+(coalton-toplevel
+
+  (define-type Gadt1
+    (Gadt1-1 (Type Gadt1)))
+
+  (declare gadt1-test-func (Gadt1 -> Boolean))
+  (define (gadt1-test-func (Gadt1-1))
+    True))
+
+(define-test test-gadt1-match ()
+  (let result =
+    (match Gadt1-1
+      ((Gadt1-1) True)))
+  (is result))
+
+(define-test test-gadt1-let ()
+  (let (Gadt1-1) = Gadt1-1)
+  (is True))
+
+(define-test test-gadt1-do ()
+  (let result =
+    (coalton/monad/identity:run-identity
+     (do
+      ((Gadt1-1) <- (pure Gadt1-1))
+      (let (Gadt1-1) = Gadt1-1)
+      (pure True))))
+  (is result))
+
+(define-test test-gadt1-func ()
+  (is (gadt1-test-func Gadt1-1)))
+
+;;;
+;;; Concrete Type w/ Single, Single-Arg Concrete Constructor
+;;;
+
+(coalton-toplevel
+
+  (define-type Gadt2
+    (Gadt2-1 (Type (String -> Gadt2))))
+
+  (declare gadt2-equals-str (Gadt2 * String -> Boolean))
+  (define (gadt2-equals-str (Gadt2-1 a) b)
+    (== a b)))
+
+(define-test test-gadt2-match ()
+  (let result =
+    (match (Gadt2-1 "test")
+      ((Gadt2-1 s) s)))
+  (is (== result "test")))
+
+(define-test test-gadt2-let ()
+  (let (Gadt2-1 s) = (Gadt2-1 "test"))
+  (is (== s "test")))
+
+(define-test test-gadt2-do ()
+  (let (Tuple s1 s2) =
+    (coalton/monad/identity:run-identity
+     (do
+      ((Gadt2-1 s1) <- (pure (Gadt2-1 "test1")))
+      (let (Gadt2-1 s2) = (Gadt2-1 "test2"))
+      (pure (Tuple s1 s2)))))
+  (is (== "test1" s1))
+  (is (== "test2" s2)))
+
+(define-test test-gadt2-func ()
+  (is (gadt2-equals-str (Gadt2-1 "test") "test")))
+
+;;;
+;;; Concrete Type w/ Single, Single-Arg Generic Constructor
+;;;
+
+(coalton-toplevel
+
+  (define-type Gadt3
+    (Gadt3-1 (Type (:a -> Gadt3))))
+
+  (declare gadt3-test-func (Gadt3 -> Boolean))
+  (define (gadt3-test-func (Gadt3-1 a))
+    (id a)
+    True))
+
+(define-test test-gadt3-match ()
+  (let result =
+    (match (Gadt3-1 "test")
+      ((Gadt3-1 s)
+       (id s)
+       True)))
+  (is result))
+
+(define-test test-gadt3-let ()
+  (let (Gadt3-1 s) = (Gadt3-1 "test"))
+  (id s)
+  (is True))
+
+(define-test test-gadt3-do ()
+  (let result =
+    (coalton/monad/identity:run-identity
+     (do
+      ((Gadt3-1 s1) <- (pure (Gadt3-1 "test1")))
+      (pure (id s1))
+      (let (Gadt3-1 s2) = (Gadt3-1 "test2"))
+      (pure (id s2))
+      (pure True))))
+  (is result))
+
+(define-test test-gadt3-func ()
+  (is (gadt3-test-func (Gadt3-1 "test"))))

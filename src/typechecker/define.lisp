@@ -1754,6 +1754,35 @@ For example:
                                     (type-object-string refinement))))))
     new-untouchable-vars))
 
+(defun check-no-untouchable-escape (type subs untouchable-vars location)
+  "Ensure that no UNTOUCHABLE-VARS appear in TYPE after applying SUBS.
+
+This catches values extracted from an existential GADT constructor argument
+escaping their pattern scope without being refined to a concrete type.
+
+For example:
+  (declare hdn-escape (Hidden -> Void))
+  (define (hdn-escape h)
+    (let improperly-escaped =
+      (match h ((Hidden a) a)))
+    (let _ = (the String improperly-escaped))
+    (values))
+"
+  (declare (type tc:ty type)
+           (type tc:substitution-list subs)
+           (type tc:tyvar-list untouchable-vars)
+           (type source:location location))
+  (let* ((type_ (tc:apply-substitution subs type))
+         (escaping-vars (intersection (tc:type-variables type_)
+                                      untouchable-vars
+                                      :test #'tc:ty=)))
+    (when escaping-vars
+      (tc-error "Untouchable existential type escapes GADT pattern scope"
+                (tc-note location
+                         "Existential type '~A' escapes through result type '~A'"
+                         (type-object-string (first escaping-vars))
+                         (type-object-string type_))))))
+
 (defun copy-branch-env (env &optional (ty-table (alexandria:copy-hash-table
                                                  (tc-env-ty-table env))))
   "Copy a branch environment from ENV and TY-TABLE."
@@ -2194,6 +2223,10 @@ Returns (VALUES INFERRED-TYPE PREDICATES NODE SUBSTITUTIONS)")
                (delta-subs subs subs-before-last-node)
                untouchable-existentials
                (source:location last-node)))
+        (check-no-untouchable-escape ty
+                                     subs
+                                     untouchable-existentials
+                                     (source:location last-node))
 
         (values
          ty
@@ -2316,6 +2349,10 @@ Returns (VALUES INFERRED-TYPE PREDICATES NODE SUBSTITUTIONS)")
                                  (delta-subs subs subs-before-body)
                                  untouchable-existentials
                                  (source:location node)))
+                          (check-no-untouchable-escape (tc:output-types-result-type output-types)
+                                                       subs
+                                                       untouchable-existentials
+                                                       (source:location node))
                           (values
                            type
                            preds
@@ -2644,7 +2681,6 @@ Returns (VALUES INFERRED-TYPE PREDICATES NODE SUBSTITUTIONS)")
                                         branch-table)
                            :collect (multiple-value-bind (body-ty preds_ accessors_ body-node subs_)
                                         (infer-expression-type body branch-ret-ty subs-for-branch-body branch-env)
-                                      (declare (ignore body-ty))
                                       (let* ((body-delta
                                                (delta-subs subs_ subs-for-branch-body))
                                              (untouchable-existentials (getf branch-dat :untouchable-existentials)))
@@ -2653,6 +2689,10 @@ Returns (VALUES INFERRED-TYPE PREDICATES NODE SUBSTITUTIONS)")
                                                body-delta
                                                untouchable-existentials
                                                (source:location branch)))
+                                        (check-no-untouchable-escape body-ty
+                                                                     subs_
+                                                                     untouchable-existentials
+                                                                     (source:location branch))
                                         (let ((branch-delta
                                                 (remove-protected-subs body-delta protected-vars)))
                                           (setf preds (append preds
@@ -3873,6 +3913,10 @@ Returns (VALUES INFERRED-TYPE PREDICATES NODE SUBSTITUTIONS)")
                        (delta-subs subs subs-before-last-node)
                        untouchable-existentials
                        (source:location last-node)))
+                (check-no-untouchable-escape ty
+                                             subs
+                                             untouchable-existentials
+                                             (source:location last-node))
                 (values
                  ty
                  (cons

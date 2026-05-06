@@ -194,7 +194,10 @@ recover the constructor signature from the matrix itself."
            (type tc:pattern-list seen-patterns)
            (values tc:pattern-list))
   (let ((entry (or (type-entry-for-column-type column-type env)
-                   (type-entry-for-seen-constructor-patterns seen-patterns env))))
+                   (and (tc:tyvar-p column-type)
+                        (type-entry-for-seen-constructor-patterns
+                         seen-patterns
+                         env)))))
     (if entry
         (loop :for constructor-name :in (tc:type-entry-constructors entry)
               :for pattern := (possible-constructor-pattern constructor-name
