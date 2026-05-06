@@ -1754,6 +1754,14 @@ For example:
                                     (type-object-string refinement))))))
     new-untouchable-vars))
 
+(defun copy-branch-env (env &optional (ty-table (alexandria:copy-hash-table
+                                                 (tc-env-ty-table env))))
+  "Copy a branch environment from ENV and TY-TABLE."
+  (make-tc-env :env (tc-env-env env)
+               :ty-table ty-table
+               :typevar-table (alexandria:copy-hash-table
+                               (tc-env-typevar-table env))))
+
 (defgeneric infer-expression-type (node expected-type subs env)
   (:documentation "Infer the type of NODE and then unify against EXPECTED-TYPE
 
@@ -2581,8 +2589,7 @@ Returns (VALUES INFERRED-TYPE PREDICATES NODE SUBSTITUTIONS)")
                (branch-data
                  (loop :for branch :in (parser:node-match-branches node)
                        :for pattern := (parser:node-match-branch-pattern branch)
-                       :for branch-env := (make-tc-env :env (tc-env-env env)
-                                                       :ty-table (alexandria:copy-hash-table (tc-env-ty-table env)))
+                       :for branch-env := (copy-branch-env env)
                        :collect (multiple-value-bind (pat-ty preds_ pat-node subs_ untouchable-existentials_)
                                     (infer-pattern-type pattern expr-ty subs branch-env)
                                   (declare (ignore pat-ty))
@@ -2626,7 +2633,7 @@ Returns (VALUES INFERRED-TYPE PREDICATES NODE SUBSTITUTIONS)")
                            :for pat-preds := (tc:apply-substitution subs-for-branch-body (getf branch-dat :pat-preds))
                            :for branch-ret-ty := (tc:apply-substitution subs-for-branch-body expected-type)
                            :for branch-table := (getf branch-dat :pat-env-ty-table)
-                           :for branch-env := (make-tc-env :env (tc-env-env env) :ty-table branch-table)
+                           :for branch-env := (copy-branch-env env branch-table)
                            :for body := (parser:node-match-branch-body branch)
 
                            ;; Update pattern bound tvars and other branch-local names with this
@@ -2663,8 +2670,7 @@ Returns (VALUES INFERRED-TYPE PREDICATES NODE SUBSTITUTIONS)")
                            :for pat-preds := (tc:apply-substitution subs-for-branch-body (getf branch-dat :pat-preds))
                            :for branch-ret-ty := (tc:apply-substitution subs-for-branch-body ret-ty)
                            :for branch-table := (getf branch-dat :pat-env-ty-table)
-                           :for branch-env := (make-tc-env :env (tc-env-env env)
-                                                           :ty-table branch-table)
+                           :for branch-env := (copy-branch-env env branch-table)
                            :for body := (parser:node-match-branch-body branch)
                            :do (maphash (lambda (name scheme)
                                           (setf (gethash name branch-table)

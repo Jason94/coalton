@@ -164,12 +164,37 @@ PATTERN-CONSTRUCTOR whose subpatterns are typed wildcards. Otherwise return NIL.
           (tc:coalton-internal-type-error ()
             nil))))))
 
-(defun possible-constructor-patterns (column-type env)
-  "Return synthetic constructor patterns for every constructor that can produce COLUMN-TYPE."
+(defun type-entry-for-seen-constructor-patterns (patterns env)
+  "Return the TYPE-ENTRY implied by constructor patterns in PATTERNS, if any.
+
+This is needed when COLUMN-TYPE is still a tyvar. In that case the column
+type has no type-constructor head, but the constructors already present in
+the pattern matrix may sitll identify the full ADT signature."
+  (declare (type tc:pattern-list patterns)
+           (type tc:environment env)
+           (values (or null tc:type-entry)))
+  (loop :for pattern :in patterns
+        :when (tc:pattern-constructor-p pattern)
+          :do (let ((entry (type-entry-for-column-type
+                            (pattern-bare-type pattern)
+                            env)))
+                (when (and entry
+                           (member (tc:pattern-constructor-name pattern)
+                                   (tc:type-entry-constructors entry)
+                                   :test #'eq))
+                  (return entry)))))
+
+(defun possible-constructor-patterns (column-type env seen-patterns)
+  "Return synthetic constructor patterns for every constructor that can produce COLUMN-TYPE.
+
+If COLUMN-TYPE has no concrete type-constructor head, use SEEN-PATTERNS as a fallback to
+recover the constructor signature from the matrix itself."
   (declare (type tc:ty column-type)
            (type tc:environment env)
+           (type tc:pattern-list seen-patterns)
            (values tc:pattern-list))
-  (let ((entry (type-entry-for-column-type column-type env)))
+  (let ((entry (or (type-entry-for-column-type column-type env)
+                   (type-entry-for-seen-constructor-patterns seen-patterns env))))
     (if entry
         (loop :for constructor-name :in (tc:type-entry-constructors entry)
               :for pattern := (possible-constructor-pattern constructor-name
@@ -256,7 +281,7 @@ the remaining columns."
        (member (tc:pattern-constructor-name constructor-pattern)
                seen-names
                :test #'eq))
-     (possible-constructor-patterns column-type env))))
+     (possible-constructor-patterns column-type env seen-patterns))))
 
 (defun useful-pattern-clause-p (pattern-matrix clause column-types env)
   "Is CLAUSE useful with respect to PATTERN-MATRIX?
@@ -309,7 +334,8 @@ type of each matrix column."
      (let* ((current-column-type (first column-types))
             (first-column-patterns (first-column-patterns pattern-matrix))
             (possible-constructors (possible-constructor-patterns current-column-type
-                                                                  env)))
+                                                                  env
+                                                                  first-column-patterns)))
        (cond
          ;; If this column has no known algebraic constructor signature, fall back
          ;; to the ordinary default matrix case.
@@ -437,7 +463,9 @@ type of each matrix column."
     (t
      (let ((constructor-names (constructor-pattern-names patterns))
            (possible-constructor-names (mapcar #'tc:pattern-constructor-name
-                                               (possible-constructor-patterns column-type env))))
+                                               (possible-constructor-patterns column-type
+                                                                              env
+                                                                              patterns))))
        (and possible-constructor-names
             (null
              (set-difference possible-constructor-names
@@ -494,7 +522,9 @@ type of each matrix column."
                                              (member (tc:pattern-constructor-name constructor-pattern)
                                                      constructor-names
                                                      :test #'eq))
-                                           (possible-constructor-patterns column-type env))))
+                                           (possible-constructor-patterns column-type
+                                                                          env
+                                                                          patterns))))
     (unless unnamed-constructor
       (util:coalton-bug "Not reachable."))
 
@@ -529,7 +559,9 @@ COLUMN-TYPES is the current type of each pattern-matrix column."
      (let* ((current-column-type (first column-types))
             (first-column-patterns (first-column-patterns pattern-matrix))
             (first-column-constructors (first-column-constructors pattern-matrix))
-            (possible-constructors (possible-constructor-patterns current-column-type env)))
+            (possible-constructors (possible-constructor-patterns current-column-type
+                                                                  env
+                                                                  first-column-patterns)))
        (cond
          ;; If the constructors in the PATTERN-MATRIX form a complete signature
          ;; for the current column type, specialize and return the first
