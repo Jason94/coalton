@@ -271,6 +271,7 @@ environment."
 
 This is intended as the compiler-side data source for SLIME/SLY/LSP hover and
 eldoc integrations. The return value is sorted by source location."
+  (declare (type tc:translation-unit translation-unit))
   (let ((results nil))
     (dolist (definition (tc:translation-unit-definitions translation-unit))
       (setf results (collect-definition-type-at-symbol-info definition env results)))
