@@ -6,7 +6,7 @@
    (#:tc #:coalton-impl/typechecker))
   (:export
    #:*symbol-hook*                        ; VARIABLE
-   #:ide-integration-p                            ; FUNCTION
+   #:ide-integration-p                    ; FUNCTION
    #:symbol-info                          ; STRUCT
    #:symbol-info-name                     ; ACCESSOR
    #:symbol-info-display-name             ; ACCESSOR
@@ -23,8 +23,6 @@
    ))
 
 (in-package #:coalton-impl/ide-integration)
-
-(declaim (optimize (debug 3) (safety 3) (speed 0)))
 
 (defvar *symbol-hook* nil
   "Hook called with one SYMBOL-INFO object for each typed symbol seen during compilation.

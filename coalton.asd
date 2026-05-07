@@ -275,6 +275,7 @@
                 :serial t
                 :components ((:file "cursor-tests")))
                (:file "entry-tests")
+               (:file "ide-integration-tests")
                (:file "codegen-pattern-tests")
                (:file "toplevel-tests")
                (:file "doc-tests")

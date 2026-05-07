@@ -12,7 +12,10 @@
    (#:ast #:coalton-impl/codegen/ast)
    (#:traverse #:coalton-impl/codegen/traverse)
    (#:analysis #:coalton-impl/analysis)
-   (#:entry #:coalton-impl/entry))
+   (#:entry #:coalton-impl/entry)
+   (#:ide #:coalton-impl/ide-integration)
+   (#:ct #:coalton)
+   (#:ctp #:coalton-prelude))
   (:export
    #:run-coalton-tests
    #:run-test-file
