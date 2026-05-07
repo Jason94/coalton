@@ -112,7 +112,7 @@
                                   :do (when inline-p (setf (gethash method-codegen-sym inline-p-table) t))))
 
                   (when (ide:ide-integration-p)
-                    (ide:collect-translation-unit-type-at-symbol-info translation-unit env))
+                    (ide:collect-translation-unit-symbol-info translation-unit env))
 
                   (analysis:analyze-translation-unit translation-unit env)
 
