@@ -28,7 +28,7 @@
 
 The hook runs after type checking and before analysis/code generation, while the
 typed AST still carries source locations. IDE integrations can bind this to
-collect ranges for hover/autodoc/eldoc queries.")
+collect ranges for hover/documentation queries.")
 
 (defun ide-integration-p ()
   "Returns T if ide integration to collect type info is hooked."
@@ -39,10 +39,10 @@ collect ranges for hover/autodoc/eldoc queries.")
   "IDE-oriented type information for one source occurrence of a Coalton symbol.
 
 START and END are zero-based character offsets into SOURCE. CATEGORY is one of
-:DEFINITION, :BINDING, :PATTERN, or :REFERENCE. NAME is the
-compiler's identifier after renaming; DISPLAY-NAME preserves the source spelling
-when it is available. TYPE is the qualified type object and TYPE-STRING is its
-printer-friendly representation in ENV."
+:DEFINITION, :BINDING, :PATTERN, or :REFERENCE. NAME is the compiler's identifier
+after renaming; DISPLAY-NAME preserves the source spelling when it is available.
+TYPE is the qualified type object and TYPE-STRING is its printer-friendly
+representation in ENV."
   (name nil :read-only t)
   (display-name nil :type (or null string) :read-only t)
   (category nil :type keyword :read-only t)
@@ -65,7 +65,7 @@ printer-friendly representation in ENV."
   "Return a smaller source location around NAME within LOCATION, plus source spelling.
 
 Typed pattern constructor locations usually cover the whole pattern form, e.g.
-`(Asteroid)`, but the IDE wants the constructor token itself. This helper is
+`(Some 1)`, but the IDE wants the constructor token itself. This helper is
 purely source-location bookkeeping; it does not query or mutate the typechecker
 environment."
   (let* ((source (and location (source:location-source location)))
@@ -120,7 +120,7 @@ environment."
      (collect-pattern-type-at-symbol-info (tc:pattern-binding-pattern pattern) env results))
     (tc:pattern-constructor
      ;; The pattern constructor itself is a symbol occurrence too. Without
-     ;; this, hovering a nullary constructor pattern like (Asteroid) falls
+     ;; this, hovering a nullary constructor pattern like (None) falls
      ;; through to the nearest enclosing expression, often a whole macro/do
      ;; form with type Unit. Use PATTERN-TYPE and a narrowed source span; do
      ;; not look up or instantiate the constructor's value type here.
