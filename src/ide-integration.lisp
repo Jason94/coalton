@@ -100,7 +100,15 @@ environment."
        :start (and span (source:span-start span))
        :end (and span (source:span-end span))))))
 
+(defun name-docstring (name env)
+  "Return the docstring registered for NAME in the typechecker name environment."
+  (let ((entry (and name
+                    (tc:lookup-name env name :no-error t))))
+    (when entry
+      (source:docstring entry))))
+
 (defun maybe-emit-symbol-info (info results)
+  "Call *SYMBOL-HOOK* with INFO if INFO is non-nil and the hook is defined."
   (when info
     (when *symbol-hook*
       (funcall *symbol-hook* info))
@@ -146,13 +154,6 @@ environment."
 (defun collect-patterns-symbol-info (patterns env results)
   (dolist (pattern patterns results)
     (setf results (collect-pattern-symbol-info pattern env results))))
-
-(defun name-docstring (name env)
-  "Return the docstring registered for NAME in the typechecker name environment."
-  (let ((entry (and name
-                    (tc:lookup-name env name :no-error t))))
-    (when entry
-      (source:docstring entry))))
 
 (defun definition-docstring (definition env)
   "typechecker/toplevel-define's don't contain a docstring or link to
