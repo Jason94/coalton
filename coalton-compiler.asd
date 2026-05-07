@@ -138,6 +138,7 @@
                              (:file "program")
                              (:file "package")))
                (:file "unlock-package" :if-feature :sb-package-locks)
+               (:file "ide-integration")
                (:file "entry")
                (:file "reader")
                (:file "debug")
