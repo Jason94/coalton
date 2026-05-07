@@ -116,28 +116,72 @@
 ;;; Type with One Arg w/ Single, Single-Arg Concrete Constructor
 ;;;
 
-;; (coalton-toplevel
+(coalton-toplevel
 
-;;   (define-type (Gadt4 :a)
-;;     (Gadt4-1 (Type (Integer -> Gadt4 Integer))))
-;;   )
+  (define-type (Gadt4 :a)
+    (Gadt4-1 (Type (Integer -> Gadt4 Integer))))
 
-;; (coalton-toplevel
+  (declare gadt4-add1->int-match (Gadt4 :a -> Integer))
+  (define (gadt4-add1->int-match g)
+    (match g
+      ((Gadt4-1 x) (1+ x))))
 
-;;   (declare gadt4-add1->int (Gadt4 :a -> Integer))
-;;   (define (gadt4-add1->int g)
-;;     (1+ x))
-;;   )
+  (declare gadt4-add1->int-abstr (Gadt4 :a -> Integer))
+  (define (gadt4-add1->int-abstr (Gadt4-1 x))
+    (1+ x))
 
-;; (coalton-toplevel
+  (declare gadt4-add1->gadt-match (Gadt4 :a -> Gadt4 :a))
+  (define (gadt4-add1->gadt-match g)
+    (match g
+      ((Gadt4-1 x) (Gadt4-1 (1+ x)))))
 
-;;   (declare gadt4-add1->int (Gadt4 :a -> Integer))
-;;   (define (gadt4-add1->int (Gadt4-1 x))
-;;     (1+ x))
-;;   )
+  (declare gadt4-add1->gadt-abstr (Gadt4 :a -> Gadt4 :a))
+  (define (gadt4-add1->gadt-abstr (Gadt4-1 x))
+    (Gadt4-1 (1+ x)))
 
-;; (coalton-toplevel
-;;   (declare gadt4-add1 (Gadt4 :a -> Gadt4 :a))
-;;   (define (gadt4-add1 (Gadt4-1 x))
-;;     (Gadt4-1 (1+ x)))
-;; )
+  (declare gadt4-add1->gadt-int-match (Gadt4 Integer -> Gadt4 Integer))
+  (define (gadt4-add1->gadt-int-match g)
+    (match g
+      ((Gadt4-1 x) (Gadt4-1 (1+ x)))))
+
+  (declare gadt4-add1->gadt-int-abstr (Gadt4 Integer -> Gadt4 Integer))
+  (define (gadt4-add1->gadt-int-abstr (Gadt4-1 x))
+    (Gadt4-1 (1+ x)))
+  )
+
+(define-test test-gadt4-concrete-match ()
+  (let result = (gadt4-add1->int-match (Gadt4-1 0)))
+  (is (== result 1)))
+
+(define-test test-gadt4-concrete-abstr ()
+  (let result = (gadt4-add1->int-abstr (Gadt4-1 0)))
+  (is (== result 1)))
+
+(define-test test-gadt4-gadt-match ()
+  (let (Gadt4-1 result) = (gadt4-add1->gadt-match (Gadt4-1 0)))
+  (is (== result 1)))
+
+(define-test test-gadt4-gadt-abstr ()
+  (let (Gadt4-1 result) = (gadt4-add1->gadt-abstr (Gadt4-1 0)))
+  (is (== result 1)))
+
+(define-test test-gadt4-gadt-let ()
+  (let (Gadt4-1 result) = (Gadt4-1 0))
+  (is (== result 0)))
+
+(define-test test-gadt4-gadt-do ()
+  (let result =
+    (coalton/monad/identity:run-identity
+     (do
+      ((Gadt4-1 a) <- (pure (Gadt4-1 0)))
+      (let (Gadt4-1 b) = (Gadt4-1 (1+ a)))
+      (pure b))))
+  (is (== result 1)))
+
+(define-test test-gadt4-specifc-type-match ()
+  (let (Gadt4-1 result) = (gadt4-add1->gadt-int-match (Gadt4-1 0)))
+  (is (== result 1)))
+
+(define-test test-gadt4-specific-type-abstr ()
+  (let (Gadt4-1 result) = (gadt4-add1->gadt-int-abstr (Gadt4-1 0)))
+  (is (== result 1)))
