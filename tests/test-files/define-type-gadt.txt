@@ -1,0 +1,69 @@
+================================================================================
+1 Define Mixed ADT/GADT
+================================================================================
+
+(package test-package)
+
+(define-type T-dtg1
+  (T-dtg1-1 (Type T-dtg1))
+  T-dtg1-2)
+
+--------------------------------------------------------------------------------
+
+error: Malformed type definition
+  --> test:3:0
+   |
+ 3 |   (define-type T-dtg1
+   |  _^
+ 4 | |   (T-dtg1-1 (Type T-dtg1))
+ 5 | |   T-dtg1-2)
+   | |___________^  cannot define implicitly and explicitly typed constructors
+
+================================================================================
+2 GADT Non-Exhaustive Match
+================================================================================
+
+(package test-package)
+
+(define-type T-dtg2
+  (T2-Int (Type (Integer -> T-dtg2)))
+  (T2-Str (Type (String -> T-dtg2))))
+
+(declare t-dtg2->int (T-dtg2 -> Integer))
+(define (t-dtg2->int g)
+  (match g
+    ((T2-Int x) x)))
+
+--------------------------------------------------------------------------------
+
+warn: non-exhaustive match
+  --> test:9:2
+    |
+ 9  |      (match g
+    |  ____^
+    | | ___-
+ 10 | ||     ((T2-Int x) x)))
+    | ||___________________- missing case (T2-STR "_")
+    | |____________________^ non-exhaustive match
+
+================================================================================
+2 GADT Non-Exhaustive Abstraction
+================================================================================
+
+(package test-package)
+
+(define-type T-dtg3
+  (T3-Int (Type (Integer -> T-dtg3)))
+  (T3-Str (Type (String -> T-dtg3))))
+
+(declare t-dtg3->int-abstr (T-dtg3 -> Integer))
+(define (t-dtg3->int-abstr (T3-Int x))
+  x)
+
+--------------------------------------------------------------------------------
+
+error: Non-exhaustive match
+  --> test:8:27
+   |
+ 8 |  (define (t-dtg3->int-abstr (T3-Int x))
+   |                             ---------- missing case (T3-STR "_")
