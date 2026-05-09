@@ -70,5 +70,3 @@
 
     (is (string= "Test Docstring"
                  (docstring test-funtion-docstring)))))
-
-(test-ide-function-docstring)
