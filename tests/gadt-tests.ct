@@ -185,3 +185,81 @@
 (define-test test-gadt4-specific-type-abstr ()
   (let (Gadt4-1 result) = (gadt4-add1->gadt-int-abstr (Gadt4-1 0)))
   (is (== result 1)))
+
+;;;
+;;; Type with No Args w/ Multiple Single-Arg Constructors
+;;;
+
+(coalton-toplevel
+  (define-type Gadt5
+    (Gadt5-Int (Type (Integer -> Gadt5)))
+    (Gadt5-Str (Type (String -> Gadt5)))
+    (Gadt5-Any (Type (:a -> Gadt5))))
+
+  (declare gadt5->int (Gadt5 -> Integer))
+  (define (gadt5->int g)
+    (match g
+      ((Gadt5-Int x) x)
+      ((Gadt5-Str s) (as Integer (string:length s)))
+      ((Gadt5-Any _) 0))))
+
+(define-test test-gadt5-match ()
+  (is (== 10 (gadt5->int (Gadt5-Int 10))))
+  (is (== 5 (gadt5->int (Gadt5-Str "12345"))))
+  (is (== 0 (gadt5->int (Gadt5-Any (Some 100))))))
+
+;;;
+;;; Type with Arg w/ Multiple Single-Arg, Concrete Constructors
+;;;
+
+(coalton-toplevel
+  (define-type (Gadt6 :a)
+    (Gadt6-Int (Type (Integer -> Gadt6 Integer)))
+    (Gadt6-Str (Type (String -> Gadt6 String))))
+
+  (declare gadt6-unwrap-int-abstr (Gadt6 Integer -> Integer))
+  (define (gadt6-unwrap-int-abstr (Gadt6-Int x))
+    x)
+
+  (declare gadt6-unwrap-int-match (Gadt6 Integer -> Integer))
+  (define (gadt6-unwrap-int-match g)
+    (match g
+      ((Gadt6-Int x) x)))
+
+  (declare gadt6->int (Gadt6 :a -> Integer))
+  (define (gadt6->int g)
+    (match g
+      ((Gadt6-Int x) x)
+      ((Gadt6-Str s) (as Integer (string:length s))))))
+
+(define-test test-gadt6-unwrap-abstr ()
+  (is (== 10 (gadt6-unwrap-int-abstr (Gadt6-Int 10)))))
+
+(define-test test-gadt6-unwrap-match ()
+  (is (== 10 (gadt6-unwrap-int-match (Gadt6-Int 10)))))
+
+(define-test test-gadt6-match-multiple ()
+  (is (== 10 (gadt6->int (Gadt6-Int 10))))
+  (is (== 5 (gadt6->int (Gadt6-Str "12345")))))
+
+;;;
+;;; Type with Arg w/ Multiple Single-Arg Constructors, including one non-concrete
+;;;
+
+(coalton-toplevel
+  (define-type (Gadt7 :a)
+    (Gadt7-Int (Type (Integer -> Gadt7 Integer)))
+    (Gadt7-Str (Type (String -> Gadt7 String)))
+    (Gadt7-Any (Type (:a -> Gadt7 :a))))
+
+  (declare gadt7->int (Gadt7 :a -> Integer))
+  (define (gadt7->int g)
+    (match g
+      ((Gadt7-Int x) x)
+      ((Gadt7-Str s) (as Integer (string:length s)))
+      ((Gadt7-Any _) 0))))
+
+(define-test test-gadt7-match-multiple ()
+  (is (== 10 (gadt7->int (Gadt7-Int 10))))
+  (is (== 5 (gadt7->int (Gadt7-Str "12345"))))
+  (is (== 0 (gadt7->int (Gadt7-Any 10)))))
