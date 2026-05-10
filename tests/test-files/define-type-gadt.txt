@@ -154,12 +154,86 @@ error: Type mismatch
   (let (T7-Gadt a) = x)
   (T7-Gadt (method-dtg7 a)))
 
-(declare t-dtg7-constraint-do ((Monad :m) (C-dtg7 :a) => :m (T-dtg7 :a) -> :m (T-dtg7 :a)))
+(declare t-dtg7-constraint-do ((coalton/classes:Monad :m) (C-dtg7 :a) => :m (T-dtg7 :a) -> :m (T-dtg7 :a)))
 (define (t-dtg7-constraint-do m)
   (do
    ((T7-Gadt a) <- m)
-   (pure (T7-Gadt (method-dtg7 a)))))
+   (coalton/classes:pure (T7-Gadt (method-dtg7 a)))))
 
 (declare t-dtg7-constraint-abstr (C-dtg7 :a => T-dtg7 :a -> T-dtg7 :a))
 (define (t-dtg7-constraint-abstr (T7-Gadt a))
   (T7-Gadt (method-dtg7 a)))
+
+================================================================================
+8 GADT Constructor With Trailing Form
+================================================================================
+
+(package test-package)
+
+(define-type T-dtg8
+  (T8-Bad (Type (Integer -> T-dtg8)) String))
+
+--------------------------------------------------------------------------------
+
+error: Malformed GADT constructor
+ --> test:4:3
+  |
+4 |    (T8-Bad (Type (Integer -> T-dtg8)) String))
+  |     ^^^^^^ unexpected trailing form #<CONCRETE-SYNTAX-TREE:ATOM-CST raw: STRING {120B5825B3}>
+  |            -------------------------- in this type definition
+
+================================================================================
+9 GADT Constructor With Empty Type Signature
+================================================================================
+
+(package test-package)
+
+(define-type T-dtg9
+  (T9-Bad (Type)))
+
+================================================================================
+10 GADT Nullary Constructor Result With Wrong Arity
+================================================================================
+
+(package test-package)
+
+(define-type (T-dtg10 :a)
+  (T10-Bad (Type T-dtg10)))
+
+================================================================================
+11 GADT Constructor Result With Too Many Type Arguments
+================================================================================
+
+(package test-package)
+
+(define-type (T-dtg11 :a)
+  (T11-Bad (Type (T-dtg11 Integer String))))
+
+================================================================================
+12 GADT Constructor Returning Multiple Values
+================================================================================
+
+(package test-package)
+
+(define-type T-dtg12
+  (T12-Bad (Type (Integer -> T-dtg12 * T-dtg12))))
+
+================================================================================
+13 Derive On GADT
+================================================================================
+
+(package test-package)
+
+(derive coalton/classes:Eq)
+(define-type T-dtg13
+  (T13-Bad (Type (Integer -> T-dtg13))))
+
+================================================================================
+14 Enum Repr On GADT Constructor With Arguments
+================================================================================
+
+(package test-package)
+
+(repr :enum)
+(define-type T-dtg14
+  (T14-Bad (Type (Integer -> T-dtg14))))

@@ -156,7 +156,7 @@
    ))
 
 (in-package #:coalton-impl/parser/toplevel)
-
+(declaim (optimize (speed 0) (space 0) (debug 3)))
 ;;;; # Toplevel Form Parsing
 ;;;;
 ;;;; identifier := <a lisp symbol>
@@ -1977,33 +1977,52 @@ consume all attributes")))
                   (cst:consp (cst:first remaining-forms))
                   (eq 'coalton:Type (cst:raw (cst:first (cst:first remaining-forms)))))
              ;; GADT Constructor - (Constr (Type (:a -> Data :a)))
-             (if (cst:atom (cst:rest (cst:first remaining-forms)))
-                 (parse-error "Malformed GADT constructor"
-                              (note source unparsed-name "expected type signature")
-                              (secondary-note source
-                                              (cst:first remaining-forms)
-                                              "in this type definition"))
-                 (let* ((signature_ (parse-qualified-type
-                                     (cst:rest (cst:first remaining-forms))
-                                     source))
-                        (signature-type (qualified-ty-type signature_))
-                        (result-type-head (or
-                                           (and (typep signature-type 'function-ty)
-                                                (function-ty-return-tycon-head
-                                                 signature-type))
-                                           (and (typep signature-type 'ty)
-                                                (ty-tycon-head signature-type)))))
-                   (unless (and result-type-head
-                                (eq (tycon-name result-type-head)
-                                    (identifier-src-name enclosing-type-name)))
-                     (parse-error "Malformed GADT constructor"
-                                  (note source
-                                        unparsed-name
-                                        "GADT constructor must return ~S"
-                                        (identifier-src-name enclosing-type-name))
-                                  (secondary-note source (cst:first remaining-forms)
-                                                  "in this type definition")))
-                   (setf signature signature_)))
+             (cond
+               ;; (Constr Type)
+               ((cst:atom (cst:rest (cst:first remaining-forms)))
+                (parse-error "Malformed GADT constructor"
+                             (note source unparsed-name "expected type signature")
+                             (secondary-note source
+                                             (cst:first remaining-forms)
+                                             "in this constructor definition")))
+               ;; (Constr (Type (:a -> Data :a)) String)
+               ((not (cst:null (cst:rest remaining-forms)))
+                (parse-error "Malformed GADT constructor"
+                             (note source unparsed-name "unexpected trailing form ~S"
+                                   (cst:raw (cst:rest remaining-forms)))
+                             (secondary-note source
+                                             (cst:first remaining-forms)
+                                             "in this constructor definition")))
+               ;; (Constr (Type (:a -> Data :a) String))
+               ((not (cst:null (cst:second (cst:first remaining-forms))))
+                (parse-error "Malformed GADT constructor"
+                             (note source unparsed-name "unexpected trailing form ~S"
+                                   (cst:raw (cst:second (cst:first remaining-forms))))
+                             (secondary-note source
+                                             (cst:first remaining-forms)
+                                             "in this constructor definition")))
+               (t
+                (let* ((signature_ (parse-qualified-type
+                                    (cst:rest (cst:first remaining-forms))
+                                    source))
+                       (signature-type (qualified-ty-type signature_))
+                       (result-type-head (or
+                                          (and (typep signature-type 'function-ty)
+                                               (function-ty-return-tycon-head
+                                                signature-type))
+                                          (and (typep signature-type 'ty)
+                                               (ty-tycon-head signature-type)))))
+                  (unless (and result-type-head
+                               (eq (tycon-name result-type-head)
+                                   (identifier-src-name enclosing-type-name)))
+                    (parse-error "Malformed GADT constructor"
+                                 (note source
+                                       unparsed-name
+                                       "GADT constructor must return ~S"
+                                       (identifier-src-name enclosing-type-name))
+                                 (secondary-note source (cst:first remaining-forms)
+                                                 "in this type definition")))
+                  (setf signature signature_))))
              ;; ADT  Constructor - (Constr :a)
              (setf unparsed-fields (cst:listify remaining-forms))))))
 

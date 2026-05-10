@@ -2797,6 +2797,11 @@ Returns (VALUES INFERRED-TYPE PREDICATES NODE SUBSTITUTIONS)")
                                                 expected-type
                                                 match-base-subs)))
 
+               (predicate-protected-vars
+                 (and match-gadt-p
+                      (tc:union-tys (tc:type-variables expr-ty)
+                                    (tc:type-variables (tc:apply-substitution match-base-subs expr-ty)))))
+
                (ret-ty (tc:make-variable :kind tc:+kstar+ :allow-result-p t))
 
                (branch-body-data
@@ -2807,7 +2812,7 @@ Returns (VALUES INFERRED-TYPE PREDICATES NODE SUBSTITUTIONS)")
                            :for branch-dat :in branch-data
                            :for branch-subs := (getf branch-dat :branch-subs)
                            :for subs-for-branch-body := (tc:compose-substitution-lists branch-subs match-base-subs)
-                           :for pat-preds := (tc:apply-substitution subs-for-branch-body (getf branch-dat :pat-preds))
+                           :for pat-preds := (getf branch-dat :pat-preds)
                            :for branch-ret-ty := (tc:apply-substitution subs-for-branch-body expected-type)
                            :for branch-table := (getf branch-dat :pat-env-ty-table)
                            :for branch-env := (copy-branch-env env branch-table)
@@ -2821,26 +2826,60 @@ Returns (VALUES INFERRED-TYPE PREDICATES NODE SUBSTITUTIONS)")
                                         branch-table)
                            :collect (multiple-value-bind (body-ty preds_ accessors_ body-node subs_)
                                         (infer-expression-type body branch-ret-ty subs-for-branch-body branch-env)
-                                      (let* ((body-delta
-                                               (delta-subs subs_ subs-for-branch-body))
-                                             (untouchable-existentials (getf branch-dat :untouchable-existentials)))
+                                      (let* (;; Subs learned while checking the branch body, after the pattern
+                                             ;; refinements were installed.
+                                             (subs-from-branch (delta-subs subs_ subs-for-branch-body))
+
+                                             ;; Subs learned across the whole branch: pattern refinements plus
+                                             ;; body refinements.
+                                             ;;
+                                             ;; Use this for predicate normalization, because predicates may need
+                                             ;; to unify:
+                                             ;;
+                                             ;;  fresh predicate var -> branch specific var -> protected outer var
+                                             ;;                                               
+                                             (branch-local-delta (delta-subs subs_ match-base-subs))
+                                             
+                                             (untouchable-existentials
+                                               (getf branch-dat :untouchable-existentials))
+
+                                             ;; Calculate subs that don't unify protected-vars, which are clean
+                                             ;; to send up to the calling block.
+                                             (branch-delta
+                                               (remove-protected-subs subs-from-branch protected-vars match-base-subs))
+
+                                             ;; Rewrites branch representatives back to protected outer vars
+                                             (normalization-subs
+                                               (branch-normalization-subs branch-local-delta predicate-protected-vars))
+
+                                             ;; Pattern predicates were produced in this branch by pattern checking,
+                                             ;; so they may need the full branch-local path
+                                             (normalized-pattern-preds
+                                               (normalize-branch-preds branch-local-delta predicate-protected-vars pat-preds))
+
+                                             ;; Body preds should only be fully applied by subs learned while checking
+                                             ;; the body, then normalized back through the GADT branch representatives.
+                                             (normalized-body-preds
+                                               (tc:apply-substitution
+                                                normalization-subs
+                                                (tc:apply-substitution subs-from-branch preds_)))
+
+                                             (normalized-preds
+                                               (append normalized-body-preds normalized-pattern-preds)))
+
                                         (setf untouchable-existentials
                                               (check-no-untouchable-refinement
-                                               body-delta
+                                               subs-from-branch
                                                untouchable-existentials
                                                (source:location branch)))
                                         (check-no-untouchable-escape body-ty
                                                                      subs_
                                                                      untouchable-existentials
                                                                      (source:location branch))
-                                        (let ((branch-delta
-                                                (remove-protected-subs body-delta protected-vars match-base-subs)))
-                                          (setf preds (append preds
-                                                              pat-preds
-                                                              (tc:apply-substitution subs_ preds_)))
-                                          (setf accessors (append accessors accessors_))
-                                          (list :body-node body-node
-                                                :branch-delta branch-delta)))))
+                                        (setf preds (append preds normalized-preds))
+                                        (setf accessors (append accessors accessors_))
+                                        (list :body-node body-node
+                                              :branch-delta branch-delta))))
 
                      ;; Plain ADT matches
                      (loop :for branch :in (parser:node-match-branches node)
@@ -2901,7 +2940,6 @@ Returns (VALUES INFERRED-TYPE PREDICATES NODE SUBSTITUTIONS)")
                                  :body branch-body-node
                                  :location (source:location branch)))))
           (declare (ignore _merge-gadt-branch-deltas))
-
           (handler-case
               (progn
                 (unless match-gadt-p
