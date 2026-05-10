@@ -129,3 +129,37 @@ error: Type mismatch
     |
  11 |      ((T6-Str _) 0)))
     |       ^^^^^^^^^^ Expected type '#<COALTON-IMPL/TYPECHECKER/TYPES:TAPP T-DTG6 INTEGER>' but pattern has type '#<COALTON-IMPL/TYPECHECKER/TYPES:TAPP T-DTG6 STRING>'
+
+================================================================================
+7 GADT Constraint Predicate Normalization
+================================================================================
+
+(package test-package)
+
+(define-type (T-dtg7 :a)
+  (T7-Gadt (Type (:a -> T-dtg7 :a))))
+
+(define-class (C-dtg7 :a)
+  (method-dtg7
+   (:a -> :a)))
+
+(declare t-dtg7-constraint-match (C-dtg7 :a => T-dtg7 :a -> T-dtg7 :a))
+(define (t-dtg7-constraint-match x)
+  (match x
+    ((T7-Gadt a)
+     (T7-Gadt (method-dtg7 a)))))
+
+(declare t-dtg7-constraint-let (C-dtg7 :a => T-dtg7 :a -> T-dtg7 :a))
+(define (t-dtg7-constraint-let x)
+  (let (T7-Gadt a) = x)
+  (T7-Gadt (method-dtg7 a)))
+
+(declare t-dtg7-constraint-do ((Monad :m) (C-dtg7 :a) => :m (T-dtg7 :a) -> :m (T-dtg7 :a)))
+(define (t-dtg7-constraint-do m)
+  (do
+   ((T7-Gadt a) <- m)
+   (pure (T7-Gadt (method-dtg7 a)))))
+
+(declare t-dtg7-constraint-abstr (C-dtg7 :a => T-dtg7 :a -> T-dtg7 :a))
+(define (t-dtg7-constraint-abstr (T7-Gadt a))
+  (T7-Gadt (method-dtg7 a)))
