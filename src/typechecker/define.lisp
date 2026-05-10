@@ -1837,7 +1837,7 @@ to their outer tyvars."
                                    :then new-unification
               :for finished := (tc:ty= new-unification old-unification)
               ;; If the protected var unifies to a concrete type, i.e. α -> Integer, discard
-              :when (and finished (not (tc:tyvar-p new-unification)))
+              :when (not (tc:tyvar-p new-unification))
                 :return nil
               :while (not finished)
               :collect (tc:make-substitution :from new-unification :to var))))
