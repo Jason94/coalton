@@ -247,19 +247,19 @@
 ;;;
 
 (coalton-toplevel
-  (define-type (Gadt7 :a)
-    (Gadt7-Int (Type (Integer -> Gadt7 Integer)))
-    (Gadt7-Str (Type (String -> Gadt7 String)))
-    (Gadt7-Any (Type (:a -> Gadt7 :a))))
+  (define-type (Gadt8 :a)
+    (Gadt8-Int (Type (Integer -> Gadt8 Integer)))
+    (Gadt8-Str (Type (String -> Gadt8 String)))
+    (Gadt8-Any (Type (:a -> Gadt8 :a))))
 
-  (declare gadt7->int (Gadt7 :a -> Integer))
-  (define (gadt7->int g)
+  (declare gadt8->int (Gadt8 :a -> Integer))
+  (define (gadt8->int g)
     (match g
-      ((Gadt7-Int x) x)
-      ((Gadt7-Str s) (as Integer (string:length s)))
-      ((Gadt7-Any _) 0))))
+      ((Gadt8-Int x) x)
+      ((Gadt8-Str s) (as Integer (string:length s)))
+      ((Gadt8-Any _) 0))))
 
-(define-test test-gadt7-match-multiple ()
-  (is (== 10 (gadt7->int (Gadt7-Int 10))))
-  (is (== 5 (gadt7->int (Gadt7-Str "12345"))))
-  (is (== 0 (gadt7->int (Gadt7-Any 10)))))
+(define-test test-gadt8-match-multiple ()
+  (is (== 10 (gadt8->int (Gadt8-Int 10))))
+  (is (== 5 (gadt8->int (Gadt8-Str "12345"))))
+  (is (== 0 (gadt8->int (Gadt8-Any 10)))))
