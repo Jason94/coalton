@@ -243,6 +243,29 @@
   (is (== 5 (gadt6->int (Gadt6-Str "12345")))))
 
 ;;;
+;;; Type with Arg w/ One, Single-Arg, Generic Constructor
+;;; 
+
+(coalton-toplevel
+  (define-type (Gadt7 :a)
+    (Gadt7 (Type (:a -> Gadt7 :a))))
+
+  (declare gadt7-unwrap-int-match (Gadt7 Integer -> Integer))
+  (define (gadt7-unwrap-int-match g)
+    (match g
+      ((Gadt7 x) x)))
+
+  (declare gadt7-unwrap-int-abstr (Gadt7 Integer -> Integer))
+  (define (gadt7-unwrap-int-abstr (Gadt7 x))
+    x))
+
+(define-test test-gadt7-unwrap-match ()
+  (is (== 10 (gadt7-unwrap-int-match (Gadt7 10)))))
+
+(define-test test-gadt7-unwrap-abstr ()
+  (is (== 10 (gadt7-unwrap-int-abstr (Gadt7 10)))))
+
+;;;
 ;;; Type with Arg w/ Multiple Single-Arg Constructors, including one non-concrete
 ;;;
 
@@ -257,9 +280,19 @@
     (match g
       ((Gadt8-Int x) x)
       ((Gadt8-Str s) (as Integer (string:length s)))
-      ((Gadt8-Any _) 0))))
+      ((Gadt8-Any _) 0)))
+
+  (declare gadt8-unwrap-int (Gadt8 Integer -> Integer))
+  (define (gadt8-unwrap-int g)
+    (match g
+      ((Gadt8-Int x) x)
+      ((Gadt8-Any x) x))))
 
 (define-test test-gadt8-match-multiple ()
   (is (== 10 (gadt8->int (Gadt8-Int 10))))
   (is (== 5 (gadt8->int (Gadt8-Str "12345"))))
   (is (== 0 (gadt8->int (Gadt8-Any 10)))))
+
+(define-test test-gadt8-unwrap-narrowed-type ()
+  (is (== 10 (gadt8-unwrap-int (Gadt8-Int 10))))
+  (is (== 10 (gadt8-unwrap-int (Gadt8-Any 10)))))

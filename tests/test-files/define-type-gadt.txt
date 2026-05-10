@@ -105,3 +105,27 @@ error: Malformed GADT constructor
  5 |    (T5-Bad (Type String)))
    |     ^^^^^^ GADT constructor must return T-DTG5
    |            ------------- in this type definition
+
+================================================================================
+6 GADT Impossible Match Branch
+================================================================================
+
+(package test-package)
+
+(define-type (T-dtg6 :a)
+  (T6-Int (Type (Integer -> T-dtg6 Integer)))
+  (T6-Str (Type (String -> T-dtg6 String))))
+
+(declare 6-unwrap-int (T-dtg6 Integer -> Integer))
+(define (6-unwrap-int g)
+  (match g
+    ((T6-Int x) x)
+    ((T6-Str _) 0)))
+
+--------------------------------------------------------------------------------
+
+error: Type mismatch
+  --> test:11:5
+    |
+ 11 |      ((T6-Str _) 0)))
+    |       ^^^^^^^^^^ Expected type '#<COALTON-IMPL/TYPECHECKER/TYPES:TAPP T-DTG6 INTEGER>' but pattern has type '#<COALTON-IMPL/TYPECHECKER/TYPES:TAPP T-DTG6 STRING>'
