@@ -257,7 +257,26 @@
 
   (declare gadt7-unwrap-int-abstr (Gadt7 Integer -> Integer))
   (define (gadt7-unwrap-int-abstr (Gadt7 x))
-    x))
+    x)
+
+  (define-class (Gadt7Class :a)
+    (gadt7-method
+     (:a -> :a)))
+  )
+
+(coalton-toplevel
+  (declare gadt7-test-constraint-match (Gadt7Class :a => Gadt7 :a -> Gadt7 :a))
+  (define (gadt7-test-constraint-match x)
+    (match x
+      ((Gadt7 a)
+       (Gadt7 (gadt7-method a)))))
+  )
+
+(coalton-toplevel
+
+  (declare gadt7-test-constraint-abstr (Gadt7Class :a => Gadt7 :a -> Gadt7 :a))
+  (define (gadt7-test-constraint-abstr (Gadt7 a))
+    (Gadt7 (gadt7-method a))))
 
 (define-test test-gadt7-unwrap-match ()
   (is (== 10 (gadt7-unwrap-int-match (Gadt7 10)))))

@@ -1823,6 +1823,35 @@ known before the branch-local block began)."
                                  protected-vars))))
    subs))
 
+(defun branch-normalization-subs (local-delta protected-vars)
+  "In a GADT branch, Calculate substitutions to unify branch-specialized PROTECTED-VARS back
+to their outer tyvars."
+  (declare (type tc:substitution-list local-delta)
+           (type tc:ty-list protected-vars)
+           (values tc:substitution-list))
+  (loop :for var :in protected-vars
+        :nconc
+        (loop :for new-unification := (tc:apply-substitution local-delta var)
+                                   :then (tc:apply-substitution local-delta new-unification)
+              :and old-unification := var
+                                   :then new-unification
+              :for finished := (tc:ty= new-unification old-unification)
+              ;; If the protected var unifies to a concrete type, i.e. α -> Integer, discard
+              :when (and finished (not (tc:tyvar-p new-unification)))
+                :return nil
+              :while (not finished)
+              :collect (tc:make-substitution :from new-unification :to var))))
+
+(defun normalize-branch-preds (local-delta protected-vars preds)
+  "In a GADT branch, normalize branch-specific PREDS to the corresponding out-of-branch tvar."
+  ;; Second, unify the branch-specific tvar to the protected tvar, to make a pred that is
+  ;; recognizeable to the outside.
+  (tc:apply-substitution
+   (branch-normalization-subs local-delta protected-vars)
+   ;; First, unify the fresh pred tyvar to the branch-specific tvar for the type variable
+   (tc:apply-substitution local-delta
+                          preds)))
+
 (defun pattern-contains-gadt-p (pattern env)
   "Determine if the pattern contains a GADT constructor. Needs to recursively walk
 all constructors in the pattern."
@@ -2453,15 +2482,25 @@ Returns (VALUES INFERRED-TYPE PREDICATES NODE SUBSTITUTIONS)")
                             :keyword-open-p nil
                             :output-types visible-output-types))
 
+                       ;; GADT: Subs calculated during this branch
+                       (local-delta (and abstraction-gadt-p
+                                         (delta-subs local-subs abstraction-base-subs)))
+
+                       ;; GADT: Transform branch-specific preds back to outward preds
+                       (normalized-preds
+                         (if abstraction-gadt-p
+                             (normalize-branch-preds local-delta protected-vars preds)
+                             preds))
+
                        (outward-subs
                          (if abstraction-gadt-p
-                             (let* ((local-delta (delta-subs local-subs abstraction-base-subs))
-                                    (outward-delta (remove-protected-subs local-delta
+                             (let* ((outward-delta (remove-protected-subs local-delta
                                                                           protected-vars
                                                                           abstraction-base-subs)))
                                (tc:compose-substitution-lists outward-delta
                                                               abstraction-base-subs))
                              local-subs)))
+
                   (handler-case
                       (progn
                         (let ((effective-expected-type (tc:apply-substitution outward-subs expected-type)))
@@ -2489,7 +2528,7 @@ Returns (VALUES INFERRED-TYPE PREDICATES NODE SUBSTITUTIONS)")
                                                            (source:location node)))
                             (values
                              type
-                             preds
+                             normalized-preds
                              accessors
                              (make-node-abstraction
                               :type (tc:qualify nil type)
