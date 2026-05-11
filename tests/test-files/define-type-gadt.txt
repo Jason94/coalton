@@ -305,3 +305,113 @@ error: Invalid repr :enum attribute
    |
  5 |    (T15-Bad (Type (Integer -> T-dtg15))))
    |    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ Enum constructors cannot have arguments.
+
+================================================================================
+16 GADT Constructor Call With Too Few Arguments
+================================================================================
+
+(package test-package)
+
+(define-type (T-dtg16 :a :b)
+  (T16-Pair (Type (Integer * String -> T-dtg16 Integer String))))
+
+(declare t-dtg16-bad (T-dtg16 Integer String))
+(define t-dtg16-bad
+  (T16-Pair 1))
+
+--------------------------------------------------------------------------------
+
+error: Argument error
+  --> test:8:2
+   |
+ 8 |    (T16-Pair 1))
+   |    ^^^^^^^^^^^^ Function call has 1 positional arguments but inferred type 'Integer * String -> T-dtg16 Integer String' takes 2
+
+================================================================================
+17 GADT Constructor Pattern With Too Few Arguments
+================================================================================
+
+(package test-package)
+
+(define-type (T-dtg17 :a :b)
+  (T17-Pair (Type (Integer * String -> T-dtg17 Integer String))))
+
+(declare t-dtg17-bad (T-dtg17 Integer String -> Integer))
+(define (t-dtg17-bad g)
+  (match g
+    ((T17-Pair x) x)))
+
+--------------------------------------------------------------------------------
+
+error: Argument mismatch
+  --> test:9:5
+   |
+ 9 |      ((T17-Pair x) x)))
+   |       ^^^^^^^^^^^^ Constructor T17-PAIR takes 2 arguments but is given 1
+
+================================================================================
+18 GADT Refined Constructor On Wrong Type
+================================================================================
+
+(package test-package)
+
+(define-type (T-dtg18 :a)
+  (T18-Int (Type (Integer -> T-dtg18 Integer)))
+  (T18-Str (Type (String -> T-dtg18 String))))
+
+(declare t-dtg18-bad (T-dtg18 String))
+(define t-dtg18-bad
+  (T18-Int 3))
+
+--------------------------------------------------------------------------------
+
+error: Type mismatch
+  --> test:9:2
+   |
+ 9 |    (T18-Int 3))
+   |    ^^^^^^^^^^^ Expected type 'T-dtg18 String' but got 'T-dtg18 Integer'
+
+================================================================================
+19 GADT Single of Multiple Constructors In Let Pattern
+================================================================================
+
+(package test-package)
+
+(define-type (T-dtg19 :a)
+  (T19-Str1 (Type (String -> T-dtg19 String)))
+  (T19-Str2 (Type (String -> T-dtg19 String))))
+
+(declare t-dtg19-bad (T-dtg19 String -> String))
+(define (t-dtg19-bad x)
+  (let (T19-Str1 s) = x)
+  s)
+
+--------------------------------------------------------------------------------
+
+error: Non-exhaustive match
+  --> test:9:7
+   |
+ 9 |    (let (T19-Str1 s) = x)
+   |         ------------ missing case (T19-STR2 "_")
+
+================================================================================
+20 GADT Single of Multiple Constructors In Abstraction
+================================================================================
+
+(package test-package)
+
+(define-type (T-dtg20 :a)
+  (T20-Str1 (Type (String -> T-dtg20 String)))
+  (T20-Str2 (Type (String -> T-dtg20 String))))
+
+(declare t-dtg20-bad (T-dtg20 String -> String))
+(define (t-dtg20-bad (T20-Str1 s))
+  s)
+
+--------------------------------------------------------------------------------
+
+error: Non-exhaustive match
+  --> test:8:21
+   |
+ 8 |  (define (t-dtg20-bad (T20-Str1 s))
+   |                       ------------ missing case (T20-STR2 "_")
