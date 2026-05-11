@@ -1981,23 +1981,26 @@ consume all attributes")))
                ;; (Constr Type)
                ((cst:atom (cst:rest (cst:first remaining-forms)))
                 (parse-error "Malformed GADT constructor"
-                             (note source unparsed-name "expected type signature")
+                             (note source remaining-forms "expected type signature")
                              (secondary-note source
                                              (cst:first remaining-forms)
                                              "in this constructor definition")))
                ;; (Constr (Type (:a -> Data :a)) String)
                ((not (cst:null (cst:rest remaining-forms)))
                 (parse-error "Malformed GADT constructor"
-                             (note source unparsed-name "unexpected trailing form ~S"
+                             (note source (cst:first (cst:rest remaining-forms))
+                                   "unexpected trailing form ~S"
                                    (cst:raw (cst:rest remaining-forms)))
                              (secondary-note source
                                              (cst:first remaining-forms)
                                              "in this constructor definition")))
                ;; (Constr (Type (:a -> Data :a) String))
-               ((not (cst:null (cst:second (cst:first remaining-forms))))
+               ((not (cst:null (cst:nthrest 2 (cst:first remaining-forms))))
                 (parse-error "Malformed GADT constructor"
-                             (note source unparsed-name "unexpected trailing form ~S"
-                                   (cst:raw (cst:second (cst:first remaining-forms))))
+                             (note source
+                                   (cst:first (cst:nthrest 2 (cst:first remaining-forms)))
+                                   "unexpected trailing form ~S"
+                                   (cst:raw (cst:first (cst:nthrest 2 (cst:first remaining-forms)))))
                              (secondary-note source
                                              (cst:first remaining-forms)
                                              "in this constructor definition")))

@@ -176,64 +176,132 @@ error: Type mismatch
 --------------------------------------------------------------------------------
 
 error: Malformed GADT constructor
- --> test:4:3
-  |
-4 |    (T8-Bad (Type (Integer -> T-dtg8)) String))
-  |     ^^^^^^ unexpected trailing form #<CONCRETE-SYNTAX-TREE:ATOM-CST raw: STRING {120B5825B3}>
-  |            -------------------------- in this type definition
+  --> test:4:37
+   |
+ 4 |    (T8-Bad (Type (Integer -> T-dtg8)) String))
+   |            -------------------------- in this constructor definition
+   |                                       ^^^^^^ unexpected trailing form (STRING)
 
 ================================================================================
-9 GADT Constructor With Empty Type Signature
+9 GADT Constructor With Inner Trailing Form
 ================================================================================
 
 (package test-package)
 
 (define-type T-dtg9
-  (T9-Bad (Type)))
+  (T9-Bad (Type (Integer -> T-dtg9) String)))
+
+--------------------------------------------------------------------------------
+
+error: Malformed GADT constructor
+  --> test:4:36
+   |
+ 4 |    (T9-Bad (Type (Integer -> T-dtg9) String)))
+   |            --------------------------------- in this constructor definition
+   |                                      ^^^^^^ unexpected trailing form STRING
 
 ================================================================================
-10 GADT Nullary Constructor Result With Wrong Arity
+10 GADT Constructor With Empty Type Signature
 ================================================================================
 
 (package test-package)
 
-(define-type (T-dtg10 :a)
-  (T10-Bad (Type T-dtg10)))
+(define-type T-dtg10
+  (T10-Bad (Type)))
+
+--------------------------------------------------------------------------------
+
+error: Malformed GADT constructor
+  --> test:4:2
+   |
+ 4 |    (T10-Bad (Type)))
+   |    ^^^^^^^^^^^^^^^^ expected type signature
+   |             ------ in this constructor definition
 
 ================================================================================
-11 GADT Constructor Result With Too Many Type Arguments
+11 GADT Nullary Constructor Result With Wrong Arity
 ================================================================================
 
 (package test-package)
 
 (define-type (T-dtg11 :a)
-  (T11-Bad (Type (T-dtg11 Integer String))))
+  (T11-Bad (Type T-dtg11)))
+
+--------------------------------------------------------------------------------
+
+error: Kind mismatch
+  --> test:4:17
+   |
+ 4 |    (T11-Bad (Type T-dtg11)))
+   |                   ^^^^^^^ Expected kind '*' but got kind '* -> *'
 
 ================================================================================
-12 GADT Constructor Returning Multiple Values
+12 GADT Constructor Result With Too Many Type Arguments
 ================================================================================
 
 (package test-package)
 
-(define-type T-dtg12
-  (T12-Bad (Type (Integer -> T-dtg12 * T-dtg12))))
+(define-type (T-dtg12 :a)
+  (T12-Bad (Type (T-dtg12 Integer String))))
+
+--------------------------------------------------------------------------------
+
+error: Kind mismatch
+  --> test:4:17
+   |
+ 4 |    (T12-Bad (Type (T-dtg12 Integer String))))
+   |                   ^^^^^^^^^^^^^^^^^^^^^^^^ Expected kind '* -> *' but got kind '*'
 
 ================================================================================
-13 Derive On GADT
+13 GADT Constructor Returning Multiple Values
+================================================================================
+
+(package test-package)
+
+(define-type T-dtg13
+  (T13-Bad (Type (Integer -> T-dtg13 * T-dtg13))))
+
+--------------------------------------------------------------------------------
+
+error: Malformed GADT constructor
+  --> test:4:3
+   |
+ 4 |    (T13-Bad (Type (Integer -> T-dtg13 * T-dtg13))))
+   |     ^^^^^^^ GADT constructor must return T-DTG13
+   |             ------------------------------------- in this type definition
+
+================================================================================
+14 Derive On GADT
 ================================================================================
 
 (package test-package)
 
 (derive coalton/classes:Eq)
-(define-type T-dtg13
-  (T13-Bad (Type (Integer -> T-dtg13))))
+(define-type T-dtg14
+  (T14-Bad (Type (Integer -> T-dtg14))))
+
+--------------------------------------------------------------------------------
+
+error: Invalid derive application
+  --> test:4:13
+   |
+ 4 |  (define-type T-dtg14
+   |               ^^^^^^^  cannot apply (derive) to a GADT definition
 
 ================================================================================
-14 Enum Repr On GADT Constructor With Arguments
+15 Enum Repr On GADT Constructor With Arguments
 ================================================================================
 
 (package test-package)
 
 (repr :enum)
-(define-type T-dtg14
-  (T14-Bad (Type (Integer -> T-dtg14))))
+(define-type T-dtg15
+  (T15-Bad (Type (Integer -> T-dtg15))))
+
+--------------------------------------------------------------------------------
+
+error: Invalid repr :enum attribute
+  --> test:5:2
+   |
+ 5 |    (T15-Bad (Type (Integer -> T-dtg15))))
+   |    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ Enum constructors cannot have arguments.
