@@ -415,3 +415,171 @@ error: Non-exhaustive match
    |
  8 |  (define (t-dtg20-bad (T20-Str1 s))
    |                       ------------ missing case (T20-STR2 "_")
+
+================================================================================
+21 GADT Polymorphic Unbox
+================================================================================
+
+(package test-package)
+
+(define-type (T-dtg21 :a)
+  (T21-Int (Type (Integer -> T-dtg21 Integer)))
+  (T21-Str (Type (String -> T-dtg21 String))))
+
+(declare t-dtg21-unbox (T-dtg21 :a -> :a))
+(define (t-dtg21-unbox g)
+  (match g
+    ((T21-Int x) x)
+    ((T21-Str s) s)))
+
+================================================================================
+22 GADT Wrong Polymorphic Unbox
+================================================================================
+
+(package test-package)
+
+(define-type (T-dtg22 :a)
+  (T22-Int (Type (Integer -> T-dtg22 Integer)))
+  (T22-Str (Type (String -> T-dtg22 String))))
+
+(declare t-dtg22-unbox (T-dtg22 :a -> :a))
+(define (t-dtg22-unbox g)
+  (match g
+    ((T22-Int x) x)
+    ((T22-Str _) 1)))
+
+--------------------------------------------------------------------------------
+
+error: Non-exhaustive match
+  --> test:8:21
+   |
+ 8 |  (define (t-dtg20-bad (T20-Str1 s))
+   |                       ------------ missing case (T20-STR2 "_")
+
+================================================================================
+23 GADT Branch Refinement Does Not Refine Unrelated Return
+================================================================================
+
+(package test-package)
+
+(define-type (T-dtg23 :a)
+  (T23-Int (Type (Integer -> T-dtg23 Integer)))
+  (T23-Str (Type (String -> T-dtg23 String))))
+
+(declare t-dtg23-bad (T-dtg23 :a -> :b))
+(define (t-dtg23-bad g)
+  (match g
+    ((T23-Int x) x)
+    ((T23-Str s) s)))
+
+================================================================================
+24 GADT Scrutinee Refinement Refines Same Type Argument
+================================================================================
+
+(package test-package)
+
+(define-type (T-dtg24 :a)
+  (T24-Int (Type (Integer -> T-dtg24 Integer)))
+  (T24-Str (Type (String -> T-dtg24 String))))
+
+(declare t-dtg24-good (T-dtg24 :a * :a -> :a))
+(define (t-dtg24-good g x)
+  (match g
+    ((T24-Int _) (+ 1 x))
+    ((T24-Str _) (coalton/string:reverse x))))
+
+================================================================================
+25 GADT Scrutinee Refinement Does Not Refine Unrelated Argument
+================================================================================
+
+(package test-package)
+
+(define-type (T-dtg25 :a)
+  (T25-Int (Type (Integer -> T-dtg25 Integer)))
+  (T25-Str (Type (String -> T-dtg25 String))))
+
+(declare t-dtg25-bad (T-dtg25 :a * :b -> :b))
+(define (t-dtg25-bad g x)
+  (match g
+    ((T25-Int _) (as Integer x))
+    ((T25-Str _) (coalton/string:reverse x))))
+
+================================================================================
+26 GADT Independent Parameters Refine Independently
+================================================================================
+
+(package test-package)
+
+(define-type (T-dtg26 :a)
+  (T26-Int (Type (Integer -> T-dtg26 Integer)))
+  (T26-Str (Type (String -> T-dtg26 String))))
+
+(declare t-dtg26-good (T-dtg26 :a * T-dtg26 :b -> Integer))
+(define (t-dtg26-good g h)
+  (match (Tuple g h)
+    ((Tuple (T26-Int x) (T26-Int y))
+     (+ x y))
+    ((Tuple (T26-Int x) (T26-Str s))
+     (+ x (coalton/string:length s)))
+    ((Tuple (T26-Str s) (T26-Int y))
+     (+ (coalton/string:length s) y))
+    ((Tuple (T26-Str s) (T26-Str t))
+     (+ (coalton/string:length s) (coalton/string:length t)))))
+
+================================================================================
+27 GADT Conflicting Parameter Refinements
+================================================================================
+
+(package test-package)
+
+(define-type (T-dtg27 :a)
+  (T27-Int (Type (Integer -> T-dtg27 Integer)))
+  (T27-Str (Type (String -> T-dtg27 String))))
+
+(declare t-dtg27-bad (T-dtg27 :a * T-dtg27 :a -> Integer))
+(define (t-dtg27-bad (T27-Int x) (T27-Str _))
+  x)
+
+================================================================================
+28 GADT Binding Pattern Preserves Refined Whole
+================================================================================
+
+(package test-package)
+
+(define-type (T-dtg28 :a)
+  (T28-Int (Type (Integer -> T-dtg28 Integer)))
+  (T28-Str (Type (String -> T-dtg28 String))))
+
+(declare t-dtg28-require-int (T-dtg28 Integer -> Integer))
+(define (t-dtg28-require-int (T28-Int x))
+  x)
+
+(declare t-dtg28-good (T-dtg28 :a -> Integer))
+(define (t-dtg28-good g)
+  (match g
+    ((= whole (T28-Int x))
+     (+ x (t-dtg28-require-int whole)))
+    ((T28-Str s)
+     (as Integer (coalton/string:length s)))))
+
+================================================================================
+29 GADT Binding Pattern With Impossible Refined Whole
+================================================================================
+
+(package test-package)
+
+(define-type (T-dtg29 :a)
+  (T29-Int (Type (Integer -> T-dtg29 Integer)))
+  (T29-Str (Type (String -> T-dtg29 String))))
+
+(declare t-dtg29-require-str (T-dtg29 String -> String))
+(define (t-dtg29-require-str (T29-Str s))
+  s)
+
+(declare t-dtg29-bad (T-dtg29 :a -> String))
+(define (t-dtg29-bad g)
+  (match g
+    ((= whole (T29-Int _))
+     (t-dtg29-require-str whole))
+    ((T29-Str s)
+     s)))
