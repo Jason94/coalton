@@ -6,16 +6,16 @@
    #:coalton/classes)
   (:local-nicknames
    (#:mt #:coalton/math)
-   (:s #:coalton/string)
-   (:sw #:coalton/show)
-   (:iter #:coalton/iterator)
-   (:l #:coalton/list)
-   (:it #:coalton/iterator)
-   (:cr #:coalton/char)
-   (:sy #:coalton/symbol)
-   (:t #:coalton/types)
-   (:tp #:coalton/tuple)
-   (:c #:coalton/cell))
+   (#:s #:coalton/string)
+   (#:sw #:coalton/show)
+   (#:iter #:coalton/iterator)
+   (#:l #:coalton/list)
+   (#:it #:coalton/iterator)
+   (#:cr #:coalton/char)
+   (#:sy #:coalton/symbol)
+   (#:t #:coalton/types)
+   (#:tp #:coalton/tuple)
+   (#:c #:coalton/cell))
   (:export
    #:Str
    #:Out
