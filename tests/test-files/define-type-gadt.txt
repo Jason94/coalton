@@ -629,3 +629,173 @@ error: Type mismatch
     |
  15 |       (t-dtg29-require-str whole))
     |                            ^^^^^ Expected type 'T-dtg29 String' but got 'T-dtg29 Integer'
+
+================================================================================
+30 GADT Existential Must Not Escape Directly
+================================================================================
+
+(package test-package)
+
+(define-type T-dtg30-Hidden
+  (T30-Hidden (Type (:a -> T-dtg30-Hidden))))
+
+(declare t-dtg30-bad (T-dtg30-Hidden -> :a))
+(define (t-dtg30-bad (T30-Hidden x))
+  x)
+
+--------------------------------------------------------------------------------
+
+error: Untouchable existential type escapes GADT pattern scope
+  --> test:7:0
+   |
+ 7 |   (define (t-dtg30-bad (T30-Hidden x))
+   |  _^
+ 8 | |   x)
+   | |____^ Existential type ':A' escapes through result type ':A'
+
+================================================================================
+31 GADT Existential Must Not Escape Through Wrapping Type
+================================================================================
+
+(package test-package)
+
+(define-type T-dtg31-Hidden
+  (T31-Hidden (Type (:a -> T-dtg31-Hidden))))
+
+(declare t-dtg31-bad (T-dtg31-Hidden -> Optional :a))
+(define (t-dtg31-bad (T31-Hidden x))
+  (Some x))
+
+--------------------------------------------------------------------------------
+
+error: Untouchable existential type escapes GADT pattern scope
+  --> test:7:0
+   |
+ 7 |   (define (t-dtg31-bad (T31-Hidden x))
+   |  _^
+ 8 | |   (Some x))
+   | |___________^ Existential type ':A' escapes through result type 'Optional :A'
+
+================================================================================
+32 GADT Existential Must Not Escape Through Closure
+================================================================================
+
+(package test-package)
+
+(define-type T-dtg32-Hidden
+  (T32-Hidden (Type (:a -> T-dtg32-Hidden))))
+
+(declare t-dtg32-bad (T-dtg32-Hidden -> (Void -> :a)))
+(define (t-dtg32-bad (T32-Hidden x))
+  (fn () x))
+
+--------------------------------------------------------------------------------
+
+error: Untouchable existential type escapes GADT pattern scope
+  --> test:7:0
+   |
+ 7 |   (define (t-dtg32-bad (T32-Hidden x))
+   |  _^
+ 8 | |   (fn () x))
+   | |____________^ Existential type ':A' escapes through result type 'Void -> :A'
+
+================================================================================
+33 GADT Existential Must Not Refine To Concrete Type
+================================================================================
+
+(package test-package)
+
+(define-type T-dtg33-Hidden
+  (T33-Hidden (Type (:a -> T-dtg33-Hidden))))
+
+(declare t-gadt33-use-int (Integer -> Unit))
+(define (t-gadt33-use-int _)
+  Unit)
+
+(declare t-dtg33-bad (T-dtg33-Hidden -> Unit))
+(define (t-dtg33-bad (T33-Hidden x))
+  (t-gadt33-use-int x)
+  Unit)
+
+--------------------------------------------------------------------------------
+
+error: Cannot refine existential type from GADT constructor arguments
+  --> test:11:0
+    |
+ 11 |   (define (t-dtg33-bad (T33-Hidden x))
+    |  _^
+ 12 | |   (t-gadt33-use-int x)
+ 13 | |   Unit)
+    | |_______^ Untouchable existential type ':A' was refined to 'Integer'
+
+================================================================================
+34 GADT Existential May Be Passed Through Id And Discarded
+================================================================================
+
+(package test-package)
+
+(define-type T-dtg34-Hidden
+  (T34-Hidden (Type (:a -> T-dtg34-Hidden))))
+
+(declare t-dtg34-good (T-dtg34-Hidden -> Unit))
+(define (t-dtg34-good (T34-Hidden x))
+  (coalton/functions:id x)
+  Unit)
+
+================================================================================
+35 GADT Existential May Be Repacked
+================================================================================
+
+(package test-package)
+
+(define-type T-dtg35-Hidden
+  (T35-Hidden (Type (:a -> T-dtg35-Hidden))))
+
+(declare t-dtg35-good (T-dtg35-Hidden -> T-dtg35-Hidden))
+(define (t-dtg35-good (T35-Hidden x))
+  (T35-Hidden x))
+
+================================================================================
+36 GADT Existential From Nested Pattern Must Be Untouchable
+================================================================================
+
+(package test-package)
+
+(define-type T-dtg37-Hidden
+  (T37-Hidden (Type (:a -> T-dtg37-Hidden))))
+
+(define-type T-dtg37-Outer
+  (T37-Outer T-dtg37-Hidden))
+
+(declare t-dtg37-bad (T-dtg37-Outer -> Unit))
+(define (t-dtg37-bad (T37-Outer (T37-Hidden x)))
+  (let _ = (the Integer x))
+  Unit)
+
+--------------------------------------------------------------------------------
+
+error: Cannot refine existential type from GADT constructor arguments
+  --> test:10:0
+    |
+ 10 |   (define (t-dtg37-bad (T37-Outer (T37-Hidden x)))
+    |  _^
+ 11 | |   (let _ = (the Integer x))
+ 12 | |   Unit)
+    | |_______^ Untouchable existential type ':A' was refined to 'Integer'
+
+================================================================================
+37 GADT Existential In Do Pattern May Be Consumed
+================================================================================
+
+(package test-package)
+
+(define-type T-dtg38-Hidden
+  (T38-Hidden (Type (:a -> T-dtg38-Hidden))))
+
+(declare t-dtg38-good ((coalton/classes:Monad :m) => :m T-dtg38-Hidden -> :m Unit))
+(define (t-dtg38-good m)
+  (do
+   ((T38-Hidden x) <- m)
+   (coalton/classes:pure
+    (coalton/functions:id x))
+   (coalton/classes:pure Unit)))
