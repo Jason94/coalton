@@ -568,6 +568,14 @@ error: Type mismatch
 (define (t-dtg27-bad (T27-Int x) (T27-Str _))
   x)
 
+--------------------------------------------------------------------------------
+
+error: Type mismatch
+  --> test:8:33
+   |
+ 8 |  (define (t-dtg27-bad (T27-Int x) (T27-Str _))
+   |                                   ^^^^^^^^^^^ Expected type 'T-dtg27 Integer' but pattern has type 'T-dtg27 String'
+
 ================================================================================
 28 GADT Binding Pattern Preserves Refined Whole
 ================================================================================
@@ -586,9 +594,11 @@ error: Type mismatch
 (define (t-dtg28-good g)
   (match g
     ((= whole (T28-Int x))
-     (+ x (t-dtg28-require-int whole)))
+     (let _ = (the Integer x))
+     (t-dtg28-require-int whole))
     ((T28-Str s)
-     (as Integer (coalton/string:length s)))))
+     (let _ = (the String s))
+     0)))
 
 ================================================================================
 29 GADT Binding Pattern With Impossible Refined Whole
@@ -611,3 +621,11 @@ error: Type mismatch
      (t-dtg29-require-str whole))
     ((T29-Str s)
      s)))
+
+--------------------------------------------------------------------------------
+
+error: Type mismatch
+  --> test:15:26
+    |
+ 15 |       (t-dtg29-require-str whole))
+    |                            ^^^^^ Expected type 'T-dtg29 String' but got 'T-dtg29 Integer'
