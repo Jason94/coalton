@@ -128,7 +128,7 @@ error: Type mismatch
   --> test:11:5
     |
  11 |      ((T6-Str _) 0)))
-    |       ^^^^^^^^^^ Expected type '#<COALTON-IMPL/TYPECHECKER/TYPES:TAPP T-DTG6 INTEGER>' but pattern has type '#<COALTON-IMPL/TYPECHECKER/TYPES:TAPP T-DTG6 STRING>'
+    |       ^^^^^^^^^^ Expected type 'T-dtg6 Integer' but pattern has type 'T-dtg6 String'
 
 ================================================================================
 7 GADT Constraint Predicate Normalization

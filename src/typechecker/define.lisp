@@ -4245,9 +4245,9 @@ Returns (VALUES INFERRED-TYPE PREDS NODE SUBSTITUTIONS EXISTENTIAL-VARS)")
                   (setf pat-ty (tc:function-return-type ctor-ty)))
               (tc:coalton-internal-type-error ()
                 (tc-error "Type mismatch"
-                          (tc-note pat "Expected type '~S' but pattern has type '~S'"
-                                   (tc:apply-substitution subs expected-type)
-                                   (tc:apply-substitution subs pat-ty)))))
+                          (tc-note pat "Expected type '~A' but pattern has type '~A'"
+                                   (type-object-string (tc:apply-substitution subs expected-type))
+                                   (type-object-string (tc:apply-substitution subs pat-ty))))))
 
             (let* ((ctor-preds (tc:apply-substitution subs ctor-preds))
                    (ctor-vars (tc:type-variables (list ctor-ty ctor-preds)))
