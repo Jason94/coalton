@@ -93,6 +93,7 @@
                (:ct-file "vector")
                (:ct-file "char")
                (:ct-file "string")
+               (:ct-file "format")
                (:ct-file "slice")
                (:ct-file "hashtable")
                (:ct-file "iterator-hashtable")
@@ -152,6 +153,8 @@
                (:module "big-float"
                 :serial t
                 :components ((:file "package")
+                             (:file "portable-big-float-macros"
+                              :if-feature (:or :coalton-portable-bigfloat (:not :sbcl)))
                              (:ct-file "impl-sbcl"
                               :if-feature (:and (:not :coalton-portable-bigfloat) :sbcl))
                              (:ct-file "impl-default"
@@ -304,6 +307,7 @@
                (:file "vector-tests")
                (:file "queue-tests")
                (:file "string-tests")
+               (:file "format-tests")
                (:file "optional-tests")
                (:file "ordtree-tests")
                (:file "ordmap-tests")
@@ -318,6 +322,7 @@
                (:file "pattern-matching-tests")
                (:file "looping-native-tests")
                (:ct-file "monomorphizer-tests")
+               (:ct-file "lawnmower-tests")
                (:ct-file "inliner-tests")
                (:file "inliner-tests-1") ; must come after inliner-tests
                (:ct-file "deriver-tests")

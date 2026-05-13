@@ -9,6 +9,9 @@
   :pathname "tests/"
   :serial t
   :components ((:file "package")
+               (:file "check-update-tests")
                (:file "diagnostics-tests")
+               (:file "project-tests")
+               (:file "syntax-tests")
                (:file "indent-tests")
                (:file "repl-tests")))

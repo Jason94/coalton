@@ -43,6 +43,7 @@
    #:likely
    #:unlikely
    #:specialize
+   #:deprecation-warning
    #:unable-to-codegen)
 
   ;; Early Types
@@ -78,8 +79,8 @@
 
   ;; Primitive Syntax
   (:export
-   #:fn #:λ
    #:Type
+   #:fn
    #:&key
    #:match
    #:type-of

@@ -182,7 +182,7 @@
              (cell:new None)
              (cell:new 0)
              cols
-             (cell:new (fn (_) True))))
+             (cell:new ƒ_.True)))
 
   ;;; Precompute title column ranges for hit testing
 
@@ -274,18 +274,6 @@
   (declare %menu-item-count (MenuBar * UFix -> UFix))
   (define (%menu-item-count mb idx)
     (list:length (.md-items (%nth-menu mb idx))))
-
-  (declare %selected-action (MenuBar -> (Optional MenuAction)))
-  (define (%selected-action mb)
-    (match (cell:read (.mb-open-index mb))
-      ((None) None)
-      ((Some idx)
-       (let menu = (%nth-menu mb idx))
-       (let sel = (cell:read (.mb-selected mb)))
-       (let items = (.md-items menu))
-       (if (< sel (list:length items))
-           (Some (.mi-action (list:nth sel items)))
-           None))))
 
   ;;; Key handling
 

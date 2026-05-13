@@ -41,6 +41,7 @@
 (defpackage #:mine/bindings/process
   (:use #:cl)
   (:export
+   #:reexec-program
    #:spawn-subprocess
    #:process-alive-p
    #:process-kill
@@ -58,7 +59,6 @@
    #:condition-wait
    #:condition-notify
    #:thread-alive-p
-   #:current-thread
    #:thread-name))
 
 ;;; Protocol server (CL side)

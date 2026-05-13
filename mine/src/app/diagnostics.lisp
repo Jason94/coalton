@@ -36,22 +36,16 @@
 (defvar *compile-file-remap* nil
   "When non-nil, a cons (temp-document-key . real-document-key) for remapping file diagnostics.")
 
-(defun mine-function (name)
-  "Return the MINE/APP/MINE function named NAME."
-  (multiple-value-bind (symbol status)
-      (find-symbol name "MINE/APP/MINE")
-    (unless (and symbol status)
-      (error "Missing mine/app/mine function ~A" name))
-    (symbol-function symbol)))
-
-(defun call-mine-function (name &rest args)
-  "Call the MINE/APP/MINE function NAME with ARGS."
-  (apply (mine-function name) args))
-
 (defun coalton-optional-value-or-nil (value)
   "Return NIL for Coalton None, otherwise return the wrapped value."
   (unless (coalton-impl/runtime/optional:cl-none-p value)
     (coalton-impl/runtime/optional:unwrap-cl-some value)))
+
+(defun user-error (st text)
+  "Queue a user-facing modal error."
+  (coalton/cell:write!
+   (mine/app/state:get-pending-error-cell st)
+   (coalton:Some text)))
 
 (defun buffer-document-key-p (document-key)
   "Return T when DOCUMENT-KEY names an unnamed in-memory buffer."
@@ -128,7 +122,7 @@ Sets *COMPILE-FILE-REMAP* and returns the temporary file path string."
                     (uiop:temporary-directory))))
     (with-open-file (s tmp-path :direction :output
                        :if-exists :supersede
-                       :external-format :utf-8)
+                       :external-format (coalton-impl/source:source-external-format))
       (write-string text s))
     (setf *compile-file-remap*
           (cons (normalize-document-key (namestring tmp-path))
@@ -378,41 +372,33 @@ Sets *COMPILE-FILE-REMAP* and returns the temporary file path string."
                         (< (second entry) current-pos)))
            (setf best entry)))))))
 
-(defun normalize-diagnostic-scope (scope)
-  "Return a scope hash table keyed by normalized document keys."
-  (when scope
-    (let ((normalized (make-hash-table :test 'equal)))
-      (maphash
-       (lambda (key value)
-         (let ((document-key (normalize-document-key key)))
-           (when document-key
-             (setf (gethash document-key normalized) value))))
-       scope)
-      normalized)))
-
 (defun jump-adjacent-diagnostic (st direction &optional scope)
   "Jump to the next (>0) or previous (<0) stored diagnostic.
-When SCOPE is a hash-table of document keys, only consider diagnostics in those files."
-  (let* ((bm (call-mine-function "GET-BUFMGR" st))
-         (cs (call-mine-function "GET-CURSOR-STATE" st))
+When SCOPE is a Coalton HashMap of document keys, only consider diagnostics in
+those files."
+  (let* ((bm (mine/app/state:get-bufmgr st))
+         (cs (mine/app/state:get-cursor-state st))
          (opt-buf (mine/buffer/manager::bufmgr-current bm))
          (buf (coalton-optional-value-or-nil opt-buf))
          (current-file (and buf (mine/buffer/buffer:buffer-document-key buf)))
          (current-pos (mine/edit/cursor:cursor-position cs))
          (all-locs (all-diagnostic-locations))
-         (normalized-scope (normalize-diagnostic-scope scope))
-         (locations (if normalized-scope
-                        (remove-if-not (lambda (loc) (gethash (first loc) normalized-scope))
-                                       all-locs)
+         (locations (if scope
+                        (remove-if-not
+                         (lambda (loc)
+                           (let ((document-key (normalize-document-key (first loc))))
+                             (and document-key
+                                  (mine/app/diagnostic-scope:contains-normalized?
+                                   scope
+                                   document-key))))
+                         all-locs)
                         all-locs))
          (cursor-file current-file)
          (cursor-pos current-pos)
          (attempted (make-hash-table :test 'equal)))
     (cond
       ((null locations)
-       (mine/pane/status::statusbar-set-message!
-        (call-mine-function "GET-STATUS-BAR" st)
-        (if scope "No project diagnostics" "No diagnostics")))
+       (user-error st (if scope "No project diagnostics" "No diagnostics")))
       (t
        (loop
          :repeat (length locations)
@@ -425,15 +411,13 @@ When SCOPE is a hash-table of document keys, only consider diagnostics in those 
                        (gethash target attempted))
                (loop-finish))
              (setf (gethash target attempted) t)
-             (when (call-mine-function "%JUMP-TO-DOCUMENT-KEY" st
-                                       (first target)
-                                       (second target))
+             (when (mine/app/navigation:jump-to-document-key st
+                                                              (first target)
+                                                              (second target))
                (return-from jump-adjacent-diagnostic t))
              (setf cursor-file (first target)
                    cursor-pos (second target)))
-       (mine/pane/status::statusbar-set-message!
-        (call-mine-function "GET-STATUS-BAR" st)
-        "No reachable diagnostics")))))
+       (user-error st "No reachable diagnostics")))))
 
 ;;; Diagnostics popup
 
@@ -543,11 +527,11 @@ When SCOPE is a hash-table of document keys, only consider diagnostics in those 
   (let* ((filepath mine/pane/editor::*editor-filepath*)
          (buf (coalton-optional-value-or-nil
                (mine/buffer/manager:bufmgr-current
-                (call-mine-function "GET-BUFMGR" st)))))
+                (mine/app/state:get-bufmgr st)))))
     (when (and (stringp filepath)
                (plusp (length filepath))
                buf)
-      (let* ((cs (call-mine-function "GET-CURSOR-STATE" st))
+      (let* ((cs (mine/app/state:get-cursor-state st))
              (position (mine/edit/cursor:cursor-position cs))
              (diagnostic (diagnostic-at-position filepath position)))
         (when diagnostic
@@ -575,8 +559,8 @@ When SCOPE is a hash-table of document keys, only consider diagnostics in those 
                  (box-w (min (+ content-w 2)
                              (max 10 (- screen-w 2))))
                  (box-h (+ (length wrapped-lines) 3))
-                 (anchor-col (call-mine-function "%COMPLETION-ANCHOR-COL" st nil ""))
-                 (anchor-row (call-mine-function "%COMPLETION-ANCHOR-ROW" st nil))
+                 (anchor-col (mine/app/navigation:completion-anchor-col st nil ""))
+                 (anchor-row (mine/app/navigation:completion-anchor-row st nil))
                  (top-limit 1)
                  (bottom-limit (max 2 (- screen-h 1)))
                  (below-row (1+ anchor-row))

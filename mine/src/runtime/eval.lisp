@@ -11,14 +11,6 @@
   (or (find-package (string-upcase package-name))
       (make-package (string-upcase package-name) :use '(#:cl))))
 
-(defun coalton-form-p (form)
-  "Return T if FORM is a Coalton toplevel or inline form."
-  (and (consp form)
-       (symbolp (car form))
-       (member (symbol-name (car form))
-               '("COALTON-TOPLEVEL" "COALTON")
-               :test #'string-equal)))
-
 (defun %format-result-values (values package)
   "Render VALUES for transport to the TUI as one printed string per value."
   (loop :for val :in values
@@ -204,7 +196,8 @@ return expression values (load returns T)."
     (uiop:with-temporary-file (:stream tmp-stream
                                 :pathname tmp-path
                                 :type (if coalton-p "ct" "lisp")
-                                :direction :output)
+                                :direction :output
+                                :external-format (coalton-impl/source:source-external-format))
       (write-string file-prefix tmp-stream)
       (write-string form-string tmp-stream)
       :close-stream
@@ -225,7 +218,8 @@ return expression values (load returns T)."
                                  *terminal-io*))
               (*package* pkg)
               (*readtable* (if coalton-p (%coalton-readtable) *readtable*)))
-        (let ((fasl (compile-file tmp-path)))
+        (let ((fasl (compile-file tmp-path
+                                  :external-format (coalton-impl/source:source-external-format))))
           (when fasl
             (unwind-protect
                  (setf result-values (multiple-value-list (load fasl)))

@@ -36,37 +36,20 @@
 
   ;;; BufferId
 
+  (derive Eq Hash)
   (define-type BufferId
     "Unique identifier for a buffer."
     (BufferId UFix))
 
-  (define-instance (Eq BufferId)
-    (define (== a b)
-      (match (Tuple a b)
-        ((Tuple (BufferId x) (BufferId y))
-         (== x y)))))
-
-  (define-instance (Hash BufferId)
-    (define (hash bid)
-      (match bid
-        ((BufferId n) (hash n)))))
-
   ;;; BufferMode
 
   (repr :enum)
+  (derive Eq)
   (define-type BufferMode
     "Major mode governing syntax and behaviour."
     ModeCoalton
     ModeLisp
     ModePlainText)
-
-  (define-instance (Eq BufferMode)
-    (define (== a b)
-      (match (Tuple a b)
-        ((Tuple (ModeCoalton)  (ModeCoalton))  True)
-        ((Tuple (ModeLisp)     (ModeLisp))     True)
-        ((Tuple (ModePlainText)(ModePlainText)) True)
-        (_ False))))
 
   ;;; Mark
 
@@ -139,7 +122,16 @@
   (define (buffer-from-file bid fpath)
     "Create a buffer by reading a file from FPATH."
     (let contents = (lisp (-> String) (fpath)
-                      (cl:handler-case (uiop:read-file-string fpath)
+                      (cl:handler-case
+                          (cl:with-open-file (s fpath
+                                                :direction :input
+                                                :element-type 'cl:character
+                                                :external-format (coalton-impl/source:source-external-format))
+                            (cl:let ((out (cl:make-string-output-stream)))
+                              (cl:loop :for ch = (cl:read-char s cl:nil cl:nil)
+                                       :while ch
+                                       :do (cl:write-char ch out))
+                              (cl:get-output-stream-string out)))
                         (cl:error () ""))))
     (let bname = (lisp (-> String) (fpath)
                    (cl:file-namestring fpath)))
