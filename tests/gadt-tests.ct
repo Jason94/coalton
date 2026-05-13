@@ -296,3 +296,119 @@
 (define-test test-gadt8-unwrap-narrowed-type ()
   (is (== 10 (gadt8-unwrap-int (Gadt8-Int 10))))
   (is (== 10 (gadt8-unwrap-int (Gadt8-Any 10)))))
+
+;;;
+;;; Type with Arg w/ Multiple Single-Arg Concrete Constructors and Polymorphic Return
+;;;
+
+(coalton-toplevel
+  (define-type (Gadt9 :a)
+    (Gadt9-Int (Type (Integer -> Gadt9 Integer)))
+    (Gadt9-Str (Type (String -> Gadt9 String))))
+
+  (declare gadt9-unbox (Gadt9 :a -> :a))
+  (define (gadt9-unbox g)
+    (match g
+      ((Gadt9-Int x) x)
+      ((Gadt9-Str s) s))))
+
+(define-test test-gadt9-polymorphic-unbox ()
+  (is (== 10 (gadt9-unbox (Gadt9-Int 10))))
+  (is (== "abc" (gadt9-unbox (Gadt9-Str "abc")))))
+
+;;;
+;;; Type with Arg w/ Concrete and Generic Constructors
+;;;
+
+(coalton-toplevel
+  (define-type (Gadt10 :a)
+    (Gadt10-Int (Type (Integer -> Gadt10 Integer)))
+    (Gadt10-Str (Type (String -> Gadt10 String)))
+    (Gadt10-Any (Type (:a -> Gadt10 :a))))
+
+  (declare gadt10-unwrap-int-tagged (Gadt10 Integer -> (Tuple Integer Integer)))
+  (define (gadt10-unwrap-int-tagged g)
+    (match g
+      ((Gadt10-Int x) (Tuple 0 x))
+      ((Gadt10-Any x) (Tuple 1 x)))))
+
+(define-test test-gadt10-generic-plus-concrete ()
+  (let (Tuple tag1 value1) = (gadt10-unwrap-int-tagged (Gadt10-Int 10)))
+  (let (Tuple tag2 value2) = (gadt10-unwrap-int-tagged (Gadt10-Any 20)))
+  (is (== 0 tag1))
+  (is (== 10 value1))
+  (is (== 1 tag2))
+  (is (== 20 value2)))
+
+;;;
+;;; Type with Arg w/ Multi-Argument Constructor
+;;;
+
+(coalton-toplevel
+  (define-type (Gadt11 :a)
+    (Gadt11-Multi (Type (Integer * String * Boolean -> Gadt11 Integer))))
+
+  (declare gadt11-fields (Gadt11 Integer -> (Tuple3 Integer String Boolean)))
+  (define (gadt11-fields g)
+    (match g
+      ((Gadt11-Multi i s b) (Tuple3 i s b)))))
+
+(define-test test-gadt11-multi-argument-constructor ()
+  (let (Tuple3 i s b) = (gadt11-fields (Gadt11-Multi 7 "seven" True)))
+  (is (== 7 i))
+  (is (== "seven" s))
+  (is b))
+
+;;;
+;;; Nested GADT Pattern inside Tuple
+;;;
+
+(coalton-toplevel
+  (define-type (Gadt12 :a)
+    (Gadt12-Int (Type (Integer -> Gadt12 Integer)))
+    (Gadt12-Str (Type (String -> Gadt12 String))))
+
+  (declare gadt12-nested-tuple ((Tuple (Gadt12 Integer) (Gadt12 String)) -> (Tuple Integer Integer)))
+  (define (gadt12-nested-tuple pair)
+    (match pair
+      ((Tuple (Gadt12-Int i) (Gadt12-Str s))
+       (Tuple (1+ i) (as Integer (coalton/string:length s)))))))
+
+(define-test test-gadt12-nested-gadt-inside-tuple ()
+  (let (Tuple i len) = (gadt12-nested-tuple (Tuple (Gadt12-Int 10) (Gadt12-Str "abc"))))
+  (is (== 11 i))
+  (is (== 3 len)))
+
+;;;
+;;; Typed Expression Evaluator with If Constructor
+;;;
+
+(coalton-toplevel
+  (define-type (Gadt13-Expr :a)
+    (Gadt13-Int (Type (Integer -> Gadt13-Expr Integer)))
+    (Gadt13-Bool (Type (Boolean -> Gadt13-Expr Boolean)))
+    (Gadt13-Str (Type (String -> Gadt13-Expr String)))
+    (Gadt13-If (Type (Gadt13-Expr Boolean * Gadt13-Expr :a * Gadt13-Expr :a -> Gadt13-Expr :a))))
+
+  (declare gadt13-eval (Gadt13-Expr :a -> :a))
+  (define (gadt13-eval expr)
+    (match expr
+      ((Gadt13-Int i) i)
+      ((Gadt13-Bool b) b)
+      ((Gadt13-Str s) s)
+      ((Gadt13-If test then else)
+       (if (gadt13-eval test)
+           (gadt13-eval then)
+           (gadt13-eval else))))))
+
+(define-test test-gadt13-typed-expression-evaluator-if ()
+  (is (== 1
+          (gadt13-eval
+           (Gadt13-If (Gadt13-Bool True)
+                      (Gadt13-Int 1)
+                      (Gadt13-Int 2)))))
+  (is (== "right"
+          (gadt13-eval
+           (Gadt13-If (Gadt13-Bool False)
+                      (Gadt13-Str "left")
+                      (Gadt13-Str "right"))))))
