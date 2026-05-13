@@ -2709,14 +2709,14 @@ Returns (VALUES INFERRED-TYPE PREDICATES NODE SUBSTITUTIONS)")
                        :key #'tc:substitution-from
                        :test #'tc:ty=))
 
-               (result-sub-tracks-protected-index-p (var branch-dat branch-body-dat protected-vars)
+               (result-sub-tracks-protected-index-p (var branch-dat branch-body-dat scrutinee-protected-vars)
                  (let ((result-sub (result-sub-for-var var (getf branch-body-dat :branch-delta))))
                    (and result-sub
                         (some (lambda (pattern-sub)
                                 (and
                                  ;; The pattern sub must be for a protected scrutinee/index var
                                  (find (tc:substitution-from pattern-sub)
-                                       protected-vars
+                                       scrutinee-protected-vars
                                        :test #'tc:ty=)
 
                                  ;; The result sub must refine to the same branch-specific type
@@ -2724,7 +2724,7 @@ Returns (VALUES INFERRED-TYPE PREDICATES NODE SUBSTITUTIONS)")
                                          (tc:substitution-to pattern-sub))))
                               (getf branch-dat :branch-subs)))))
 
-               (index-tracking-result-vars (branch-data branch-body-data expected-type protected-vars)
+               (index-tracking-result-vars (branch-data branch-body-data expected-type scrutinee-protected-vars)
                  (remove-if-not
                   (lambda (var)
                     (every #'identity
@@ -2734,7 +2734,7 @@ Returns (VALUES INFERRED-TYPE PREDICATES NODE SUBSTITUTIONS)")
                                            var
                                            branch-dat
                                            branch-body-dat
-                                           protected-vars))))
+                                           scrutinee-protected-vars))))
                   (tc:type-variables expected-type)))
 
                (drop-index-tracking-result-subs (branch-delta index-tracking-vars)
@@ -2791,11 +2791,17 @@ Returns (VALUES INFERRED-TYPE PREDICATES NODE SUBSTITUTIONS)")
                ;; A GADT branch needs to conduct branch-local refinements of pattern variables.
                ;; These variables are "protected" from branch-local refinement, and will not
                ;; leak into other branches or out of the match.
-               (protected-vars
+               (scrutinee-protected-vars
                  (and match-gadt-p
-                      (calculate-protected-vars (list expr-ty)
-                                                expected-type
-                                                match-base-subs)))
+                      (tc:union-tys
+                       (tc:type-variables expr-ty)
+                       (tc:type-variables (tc:apply-substitution match-base-subs expr-ty)))))
+
+               (result-vars
+                 (and match-gadt-p
+                      (tc:union-tys
+                       (tc:type-variables expected-type)
+                       (tc:type-variables (tc:apply-substitution match-base-subs expected-type)))))
 
                (predicate-protected-vars
                  (and match-gadt-p
@@ -2846,7 +2852,7 @@ Returns (VALUES INFERRED-TYPE PREDICATES NODE SUBSTITUTIONS)")
                                              ;; Calculate subs that don't unify protected-vars, which are clean
                                              ;; to send up to the calling block.
                                              (branch-delta
-                                               (remove-protected-subs subs-from-branch protected-vars match-base-subs))
+                                               (remove-protected-subs subs-from-branch scrutinee-protected-vars match-base-subs))
 
                                              ;; Rewrites branch representatives back to protected outer vars
                                              (normalization-subs
@@ -2910,8 +2916,8 @@ Returns (VALUES INFERRED-TYPE PREDICATES NODE SUBSTITUTIONS)")
                                                 (index-tracking-result-vars
                                                  branch-data
                                                  branch-body-data
-                                                 expected-type
-                                                 protected-vars)))
+                                                 result-vars
+                                                 scrutinee-protected-vars)))
 
                ;; GADT branches were checked independently. Merge only the non-protected
                ;; subs learned by each branch. If ordinary outer variables disagree
@@ -3182,6 +3188,12 @@ Returns (VALUES INFERRED-TYPE PREDICATES NODE SUBSTITUTIONS)")
 
     (let* ((block-type (tc:make-variable :kind tc:+kstar+ :allow-result-p t))
            (block-info (make-return-block-info :type block-type)))
+
+      (handler-case
+          (setf subs (tc:unify subs block-type expected-type))
+        (tc:coalton-internal-type-error ()
+          (standard-expression-type-mismatch-error node subs expected-type block-type)))
+      
       (multiple-value-bind (body-ty preds accessors body-node subs)
           (let ((*return-blocks*
                   (acons (parser:node-block-name node)

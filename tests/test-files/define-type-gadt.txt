@@ -445,16 +445,16 @@ error: Non-exhaustive match
 (declare t-dtg22-unbox (T-dtg22 :a -> :a))
 (define (t-dtg22-unbox g)
   (match g
-    ((T22-Int x) x)
-    ((T22-Str _) 1)))
+    ((T22-Int _) "")
+    ((T22-Str s) s)))
 
 --------------------------------------------------------------------------------
 
-error: Non-exhaustive match
-  --> test:8:21
-   |
- 8 |  (define (t-dtg20-bad (T20-Str1 s))
-   |                       ------------ missing case (T20-STR2 "_")
+error: Type mismatch
+  --> test:10:17
+    |
+ 10 |      ((T22-Int _) "")
+    |                   ^^ Expected type 'Integer' but got 'String'
 
 ================================================================================
 23 GADT Branch Refinement Does Not Refine Unrelated Return
