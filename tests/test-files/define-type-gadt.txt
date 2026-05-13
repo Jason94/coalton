@@ -472,6 +472,14 @@ error: Type mismatch
     ((T23-Int x) x)
     ((T23-Str s) s)))
 
+--------------------------------------------------------------------------------
+
+error: Type mismatch
+  --> test:11:17
+    |
+ 11 |      ((T23-Str s) s)))
+    |                   ^ Expected type 'Integer' but got 'String'
+
 ================================================================================
 24 GADT Scrutinee Refinement Refines Same Type Argument
 ================================================================================
@@ -485,8 +493,8 @@ error: Type mismatch
 (declare t-dtg24-good (T-dtg24 :a * :a -> :a))
 (define (t-dtg24-good g x)
   (match g
-    ((T24-Int _) (+ 1 x))
-    ((T24-Str _) (coalton/string:reverse x))))
+    ((T24-Int _) x)
+    ((T24-Str _) x)))
 
 ================================================================================
 25 GADT Scrutinee Refinement Does Not Refine Unrelated Argument
@@ -501,8 +509,16 @@ error: Type mismatch
 (declare t-dtg25-bad (T-dtg25 :a * :b -> :b))
 (define (t-dtg25-bad g x)
   (match g
-    ((T25-Int _) (as Integer x))
-    ((T25-Str _) (coalton/string:reverse x))))
+    ((T25-Int _) (the Integer x))
+    ((T25-Str _) (the String x))))
+
+--------------------------------------------------------------------------------
+
+error: Type mismatch
+  --> test:11:29
+    |
+ 11 |      ((T25-Str _) (the String x))))
+    |                               ^ Expected type 'Integer' but got 'String'
 
 ================================================================================
 26 GADT Independent Parameters Refine Independently
@@ -516,15 +532,27 @@ error: Type mismatch
 
 (declare t-dtg26-good (T-dtg26 :a * T-dtg26 :b -> Integer))
 (define (t-dtg26-good g h)
-  (match (Tuple g h)
-    ((Tuple (T26-Int x) (T26-Int y))
-     (+ x y))
-    ((Tuple (T26-Int x) (T26-Str s))
-     (+ x (coalton/string:length s)))
-    ((Tuple (T26-Str s) (T26-Int y))
-     (+ (coalton/string:length s) y))
-    ((Tuple (T26-Str s) (T26-Str t))
-     (+ (coalton/string:length s) (coalton/string:length t)))))
+  (match g
+    ((T26-Int x)
+     (match h
+      ((T26-Int y)
+       (let _ = (the Integer x))
+       (let _ = (the Integer y))
+       0)
+      ((T26-Str y)
+       (let _ = (the Integer x))
+       (let _ = (the String y))
+       0)))
+    ((T26-Str x)
+     (match h
+      ((T26-Int y)
+       (let _ = (the String x))
+       (let _ = (the Integer y))
+       0)
+      ((T26-Str y)
+       (let _ = (the String x))
+       (let _ = (the String y))
+       0)))))
 
 ================================================================================
 27 GADT Conflicting Parameter Refinements

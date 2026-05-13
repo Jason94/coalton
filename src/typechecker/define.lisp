@@ -2703,49 +2703,7 @@ Returns (VALUES INFERRED-TYPE PREDICATES NODE SUBSTITUTIONS)")
                                subs
                                env)
 
-      (labels ((result-sub-for-var (var branch-delta)
-                 (find var
-                       branch-delta
-                       :key #'tc:substitution-from
-                       :test #'tc:ty=))
-
-               (result-sub-tracks-protected-index-p (var branch-dat branch-body-dat scrutinee-protected-vars)
-                 (let ((result-sub (result-sub-for-var var (getf branch-body-dat :branch-delta))))
-                   (and result-sub
-                        (some (lambda (pattern-sub)
-                                (and
-                                 ;; The pattern sub must be for a protected scrutinee/index var
-                                 (find (tc:substitution-from pattern-sub)
-                                       scrutinee-protected-vars
-                                       :test #'tc:ty=)
-
-                                 ;; The result sub must refine to the same branch-specific type
-                                 (tc:ty= (tc:substitution-to result-sub)
-                                         (tc:substitution-to pattern-sub))))
-                              (getf branch-dat :branch-subs)))))
-
-               (index-tracking-result-vars (branch-data branch-body-data expected-type scrutinee-protected-vars)
-                 (remove-if-not
-                  (lambda (var)
-                    (every #'identity
-                           (loop :for branch-dat :in branch-data
-                                 :for branch-body-dat :in branch-body-data
-                                 :collect (result-sub-tracks-protected-index-p
-                                           var
-                                           branch-dat
-                                           branch-body-dat
-                                           scrutinee-protected-vars))))
-                  (tc:type-variables expected-type)))
-
-               (drop-index-tracking-result-subs (branch-delta index-tracking-vars)
-                 (remove-if
-                  (lambda (sub)
-                    (find (tc:substitution-from sub)
-                          index-tracking-vars
-                          :test #'tc:ty=))
-                  branch-delta))
-
-               (merge-gadt-branch-delta (subs delta)
+      (labels ((merge-gadt-branch-delta (subs delta branch-node)
                  (dolist (sub delta subs)
                    (let* ((from (tc:substitution-from sub))
                           (to (tc:substitution-to sub))
@@ -2753,10 +2711,17 @@ Returns (VALUES INFERRED-TYPE PREDICATES NODE SUBSTITUTIONS)")
                                           :key #'tc:substitution-from
                                           :test #'tc:ty=)))
                      (if existing
-                         (setf subs
-                               (tc:unify subs
-                                         (tc:substitution-to existing)
-                                         to))
+                         (handler-case
+                             (setf subs
+                                   (tc:unify subs
+                                             (tc:substitution-to existing)
+                                             to))
+                           (tc:coalton-internal-type-error ()
+                             (standard-expression-type-mismatch-error
+                              (node-body-last-node branch-node)
+                              subs
+                              (tc:substitution-to existing)
+                              to)))
                          (push sub subs))))))
 
         (let* (;; Infer the type of each pattern, unifying against expr-ty, specialized for
@@ -2796,12 +2761,6 @@ Returns (VALUES INFERRED-TYPE PREDICATES NODE SUBSTITUTIONS)")
                       (tc:union-tys
                        (tc:type-variables expr-ty)
                        (tc:type-variables (tc:apply-substitution match-base-subs expr-ty)))))
-
-               (result-vars
-                 (and match-gadt-p
-                      (tc:union-tys
-                       (tc:type-variables expected-type)
-                       (tc:type-variables (tc:apply-substitution match-base-subs expected-type)))))
 
                (predicate-protected-vars
                  (and match-gadt-p
@@ -2912,25 +2871,18 @@ Returns (VALUES INFERRED-TYPE PREDICATES NODE SUBSTITUTIONS)")
                                       (list :body-node body-node
                                             :branch-delta nil)))))
 
-               (index-tracking-result-vars (and match-gadt-p
-                                                (index-tracking-result-vars
-                                                 branch-data
-                                                 branch-body-data
-                                                 result-vars
-                                                 scrutinee-protected-vars)))
-
                ;; GADT branches were checked independently. Merge only the non-protected
                ;; subs learned by each branch. If ordinary outer variables disagree
-               ;; across branches, this merge will fail.
+               ;; across branches, this merge will fail. Result variables that are not
+               ;; part of the scrutinee type are ordinary outer variables.
                (_merge-gadt-branch-deltas
                  (when match-gadt-p
                    (dolist (branch-body-dat branch-body-data)
                      (setf subs
                            (merge-gadt-branch-delta
                             subs
-                            (drop-index-tracking-result-subs
-                             (getf branch-body-dat :branch-delta)
-                             index-tracking-result-vars))))))
+                            (getf branch-body-dat :branch-delta)
+                            (getf branch-body-dat :body-node))))))
 
                (branch-body-nodes (mapcar (lambda (branch-body-dat)
                                             (getf branch-body-dat :body-node))
