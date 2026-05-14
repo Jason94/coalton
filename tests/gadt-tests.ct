@@ -238,9 +238,18 @@
 (define-test test-gadt6-unwrap-match ()
   (is (== 10 (gadt6-unwrap-int-match (Gadt6-Int 10)))))
 
-(define-test test-gadt6-match-multiple ()
-  (is (== 10 (gadt6->int (Gadt6-Int 10))))
-  (is (== 5 (gadt6->int (Gadt6-Str "12345")))))
+(define-test test-gadt6-match-multiple-noinline ()
+  (is (== 10 (noinline (gadt6->int (Gadt6-Int 10)))))
+  (is (== 5 (noinline (gadt6->int (Gadt6-Str "12345"))))))
+
+(define-test foo ()
+  (is (== 10
+          (match (Gadt6-Int 1)
+            ((Gadt6-Int x) x)))))
+
+(define-test test-gadt6-match-multiple-inline ()
+  (is (== 10 (inline (gadt6->int (Gadt6-Int 10)))))
+  (is (== 5 (inline (gadt6->int (Gadt6-Str "12345"))))))
 
 ;;;
 ;;; Type with Arg w/ One, Single-Arg, Generic Constructor
